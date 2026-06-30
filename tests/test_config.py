@@ -16,4 +16,4 @@ def test_settings_missing_credentials_raises(monkeypatch):
     monkeypatch.setenv("DEALPOS_SUBDOMAIN", "x")
     monkeypatch.setenv("DEALPOS_CLIENT_SECRET", "secret")
     with pytest.raises(Exception):
-        Settings()
+        Settings(_env_file=None)  # skip .env so monkeypatch deletion is effective
