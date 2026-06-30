@@ -82,3 +82,56 @@ async def list_products(client: DealPOSClient, name: str | None = None,
 async def get_product(client: DealPOSClient, code: str) -> dict:
     """Get a single product by its Code."""
     return await client.request("GET", "/api/v3/Product/Code", params={"Code": code})
+
+
+# --- products write ---
+
+async def create_product(client: DealPOSClient, name: str, code: str, category: str,
+                         brand: str, unit_price: float, unit_cost: float = 0,
+                         stock: float = 0, image_url: str = "",
+                         model: str = "Standard") -> dict:
+    """Create a single-variant product. unit_price is required.
+
+    Note: ``stock`` is accepted for a forward-compatible signature but opening stock
+    is set via a separate inventory adjustment endpoint (deferred), so it is not yet sent.
+    """
+    if unit_price is None:
+        raise DealPOSError("unit_price is required to create a product.")
+    body = {
+        "Category": category, "Name": name, "Brand": brand, "Code": code,
+        "Discontinued": False, "ImageURL": image_url,
+        "Variants": [{"Model": model, "Code": code, "UnitCost": unit_cost,
+                      "UnitPrice": unit_price, "Discontinued": False}],
+    }
+    return await client.request("POST", "/api/v3/Product", json=body)
+
+
+async def update_product_price(client: DealPOSClient, code: str, new_price: float,
+                               variant_code: str | None = None) -> dict:
+    """Reprice a product: fetch it, set the variant UnitPrice, PUT it back (update by Code)."""
+    product = await get_product(client, code)
+    variants = product.get("Variants") or []
+    if not variants:
+        raise DealPOSError(f"Product {code} has no variants to reprice.")
+    target = variant_code or code
+    changed = False
+    for v in variants:
+        if variant_code is None or v.get("Code") == target:
+            v["UnitPrice"] = new_price
+            changed = True
+    if not changed:
+        raise DealPOSError(f"Variant {variant_code} not found on product {code}.")
+    return await client.request("PUT", "/api/v3/Product", json=product)
+
+
+# --- customers write ---
+
+async def create_customer(client: DealPOSClient, name: str, email: str,
+                          mobile_phone: str, code: str | None = None) -> dict:
+    """Create a customer. Required by the API: ID, Code, Email, MobilePhone, Name, Status."""
+    if not code:
+        nc = await client.request("GET", "/api/v3/Customer/NewCode")
+        code = nc.get("Code") if isinstance(nc, dict) else str(nc)
+    body = {"ID": "", "Code": code, "Email": email, "MobilePhone": mobile_phone,
+            "Name": name, "Status": "Active"}
+    return await client.request("POST", "/api/v3/Customer", json=body)

@@ -63,3 +63,61 @@ async def test_get_product_by_code(client):
         return_value=httpx.Response(200, json={"Name": "Vinyl A", "Code": "VA"}))
     out = await tools.get_product(client, code="VA")
     assert out["Name"] == "Vinyl A"
+
+
+# --- create product (plan Task 8) ---
+
+@respx.mock
+async def test_create_product_builds_required_body(client):
+    _token()
+    route = respx.post("https://doubledeer.dealpos.co.id/api/v3/Product").mock(
+        return_value=httpx.Response(200, json={"Code": "VINYL-001"}))
+    out = await tools.create_product(client, name="New Vinyl", code="VINYL-001",
+                                     category="Music/Vinyl", brand="Double Deer",
+                                     unit_price=350000, unit_cost=200000, stock=20)
+    assert out["Code"] == "VINYL-001"
+    body = route.calls[0].request.content.decode()
+    assert '"Name":"New Vinyl"' in body or '"Name": "New Vinyl"' in body
+    assert "Variants" in body
+
+
+async def test_create_product_requires_price():
+    c = DealPOSClient(Settings(subdomain="x", client_id="a", client_secret="b"))
+    with pytest.raises(DealPOSError):
+        await tools.create_product(c, name="x", code="y", category="c", brand="b",
+                                   unit_price=None)  # type: ignore[arg-type]
+
+
+# --- update product price (plan Task 9) ---
+
+@respx.mock
+async def test_update_product_price_sends_full_product_body(client):
+    _token()
+    respx.get("https://doubledeer.dealpos.co.id/api/v3/Product/Code").mock(
+        return_value=httpx.Response(200, json={
+            "Category": "Music/Vinyl", "Name": "Vinyl A", "Brand": "DD", "Code": "VA",
+            "Discontinued": False, "ImageURL": "",
+            "Variants": [{"Model": "Standard", "Code": "VA", "UnitCost": 100000,
+                          "UnitPrice": 300000, "Discontinued": False}]}))
+    route = respx.put("https://doubledeer.dealpos.co.id/api/v3/Product").mock(
+        return_value=httpx.Response(200, json={"Code": "VA"}))
+    out = await tools.update_product_price(client, code="VA", new_price=420000)
+    assert out["Code"] == "VA"
+    body = route.calls[0].request.content.decode()
+    assert "420000" in body
+
+
+# --- create customer (plan Task 10) ---
+
+@respx.mock
+async def test_create_customer_fetches_newcode_when_missing(client):
+    _token()
+    respx.get("https://doubledeer.dealpos.co.id/api/v3/Customer/NewCode").mock(
+        return_value=httpx.Response(200, json={"Code": "CUST-009"}))
+    route = respx.post("https://doubledeer.dealpos.co.id/api/v3/Customer").mock(
+        return_value=httpx.Response(200, json={"Code": "CUST-009", "Name": "Rian"}))
+    out = await tools.create_customer(client, name="Rian", email="rian@example.com",
+                                      mobile_phone="08123456789")
+    assert out["Code"] == "CUST-009"
+    body = route.calls[0].request.content.decode()
+    assert "CUST-009" in body and "Active" in body
