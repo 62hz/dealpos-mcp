@@ -121,3 +121,368 @@ async def test_create_customer_fetches_newcode_when_missing(client):
     assert out["Code"] == "CUST-009"
     body = route.calls[0].request.content.decode()
     assert "CUST-009" in body and "Active" in body
+
+
+# ═══════════════════════════════════════════════════════
+# NEW TOOLS — expansion (2026-07-09)
+# ═══════════════════════════════════════════════════════
+
+import json as _json
+
+
+BASE = "https://doubledeer.dealpos.co.id"
+
+
+# --- list_inventory exposed ---
+
+@respx.mock
+async def test_list_inventory_returns_rows(client):
+    _token()
+    respx.get(f"{BASE}/api/v3/Inventory").mock(
+        return_value=httpx.Response(200, json=[
+            {"Code": "A", "I": {"Available": 10}},
+            {"Code": "B", "I": {"Available": 0}},
+        ]))
+    out = await tools.list_inventory(client)
+    assert len(out) == 2
+    assert out[0]["Code"] == "A"
+
+
+@respx.mock
+async def test_list_inventory_category_param(client):
+    _token()
+    route = respx.get(f"{BASE}/api/v3/Inventory").mock(
+        return_value=httpx.Response(200, json=[]))
+    await tools.list_inventory(client, category="Music/Vinyl")
+    assert route.calls[0].request.url.params["Category"] == "Music/Vinyl"
+
+
+# --- list_customers ---
+
+@respx.mock
+async def test_list_customers_returns_rows(client):
+    _token()
+    respx.get(f"{BASE}/api/v3/Customer").mock(
+        return_value=httpx.Response(200, json=[{"Code": "C001", "Name": "Alice"}]))
+    out = await tools.list_customers(client)
+    assert out[0]["Code"] == "C001"
+
+
+@respx.mock
+async def test_list_customers_name_filter(client):
+    _token()
+    route = respx.get(f"{BASE}/api/v3/Customer").mock(
+        return_value=httpx.Response(200, json=[]))
+    await tools.list_customers(client, name="Alice")
+    assert route.calls[0].request.url.params["Name"] == "Alice"
+
+
+@respx.mock
+async def test_list_customers_email_filter(client):
+    _token()
+    route = respx.get(f"{BASE}/api/v3/Customer").mock(
+        return_value=httpx.Response(200, json=[]))
+    await tools.list_customers(client, email="alice@test.com")
+    assert route.calls[0].request.url.params["Email"] == "alice@test.com"
+
+
+@respx.mock
+async def test_list_customers_non_list_response(client):
+    _token()
+    respx.get(f"{BASE}/api/v3/Customer").mock(
+        return_value=httpx.Response(200, json={}))
+    out = await tools.list_customers(client)
+    assert out == []
+
+
+# --- list_categories, list_outlets, list_suppliers ---
+
+@respx.mock
+async def test_list_categories(client):
+    _token()
+    respx.get(f"{BASE}/api/v3/Category").mock(
+        return_value=httpx.Response(200, json=[{"ID": 1, "Name": "Vinyl"}]))
+    out = await tools.list_categories(client)
+    assert out[0]["Name"] == "Vinyl"
+
+
+@respx.mock
+async def test_list_outlets(client):
+    _token()
+    respx.get(f"{BASE}/api/v3/Outlet").mock(
+        return_value=httpx.Response(200, json=[{"ID": "MF01", "Name": "Medium Format"}]))
+    out = await tools.list_outlets(client)
+    assert out[0]["Name"] == "Medium Format"
+
+
+@respx.mock
+async def test_list_suppliers(client):
+    _token()
+    respx.get(f"{BASE}/api/v3/Supplier").mock(
+        return_value=httpx.Response(200, json=[{"Code": "S01", "Name": "Distro"}]))
+    out = await tools.list_suppliers(client)
+    assert out[0]["Code"] == "S01"
+
+
+# --- get_writeoffs ---
+
+@respx.mock
+async def test_get_writeoffs_sums_total(client):
+    _token()
+    respx.get(f"{BASE}/api/v3/InvoiceWriteOff").mock(
+        return_value=httpx.Response(200, json=[
+            {"Total": 10000}, {"Total": 5000}]))
+    out = await tools.get_writeoffs(client, "2026-01-01", "2026-06-30")
+    assert out["total"] == 15000.0
+    assert out["count"] == 2
+    assert out["date_from"] == "2026-01-01"
+
+
+@respx.mock
+async def test_get_writeoffs_empty(client):
+    _token()
+    respx.get(f"{BASE}/api/v3/InvoiceWriteOff").mock(
+        return_value=httpx.Response(200, json=[]))
+    out = await tools.get_writeoffs(client, "2026-01-01", "2026-06-30")
+    assert out["total"] == 0.0
+    assert out["items"] == []
+
+
+@respx.mock
+async def test_get_writeoffs_date_params(client):
+    _token()
+    route = respx.get(f"{BASE}/api/v3/InvoiceWriteOff").mock(
+        return_value=httpx.Response(200, json=[]))
+    await tools.get_writeoffs(client, "2026-06-01", "2026-06-30")
+    p = route.calls[0].request.url.params
+    assert p["From"] == "2026-06-01" and p["To"] == "2026-06-30"
+
+
+# --- list_invoices ---
+
+@respx.mock
+async def test_list_invoices_sums_net(client):
+    _token()
+    respx.get(f"{BASE}/api/v3/Invoice").mock(
+        return_value=httpx.Response(200, json=[
+            {"NetSales": 100000}, {"NetSales": 50000}]))
+    out = await tools.list_invoices(client, date_from="2026-01-01", date_to="2026-06-30")
+    assert out["total_net"] == 150000.0
+    assert out["count"] == 2
+
+
+@respx.mock
+async def test_list_invoices_customer_code_param(client):
+    _token()
+    route = respx.get(f"{BASE}/api/v3/Invoice").mock(
+        return_value=httpx.Response(200, json=[]))
+    await tools.list_invoices(client, customer_code="C001")
+    assert route.calls[0].request.url.params["CustomerCode"] == "C001"
+
+
+@respx.mock
+async def test_list_invoices_has_pagination(client):
+    _token()
+    route = respx.get(f"{BASE}/api/v3/Invoice").mock(
+        return_value=httpx.Response(200, json=[]))
+    await tools.list_invoices(client)
+    p = route.calls[0].request.url.params
+    assert p["PageNumber"] == "1" and p["PageSize"] == "50"
+
+
+# --- list_sales_orders ---
+
+@respx.mock
+async def test_list_sales_orders_status_filter(client):
+    _token()
+    route = respx.get(f"{BASE}/api/v3/SalesOrder").mock(
+        return_value=httpx.Response(200, json=[{"ID": "SO-001"}]))
+    out = await tools.list_sales_orders(client, status="Pending")
+    assert route.calls[0].request.url.params["Status"] == "Pending"
+    assert len(out) == 1
+
+
+@respx.mock
+async def test_list_sales_orders_non_list(client):
+    _token()
+    respx.get(f"{BASE}/api/v3/SalesOrder").mock(
+        return_value=httpx.Response(200, json={}))
+    out = await tools.list_sales_orders(client)
+    assert out == []
+
+
+# --- get_receivables ---
+
+@respx.mock
+async def test_get_receivables_returns_all(client):
+    _token()
+    respx.get(f"{BASE}/api/v3/Receivable").mock(
+        return_value=httpx.Response(200, json=[
+            {"Total": 500000, "DueDate": "2026-01-01T00:00:00"}]))
+    out = await tools.get_receivables(client)
+    assert out["count"] == 1
+    assert out["total"] == 500000.0
+
+
+@respx.mock
+async def test_get_receivables_overdue_filter(client):
+    from datetime import date, timedelta
+    _token()
+    overdue = (date.today() - timedelta(days=15)).isoformat() + "T00:00:00"
+    recent = (date.today() - timedelta(days=2)).isoformat() + "T00:00:00"
+    respx.get(f"{BASE}/api/v3/Receivable").mock(
+        return_value=httpx.Response(200, json=[
+            {"Total": 100000, "DueDate": overdue},
+            {"Total": 200000, "DueDate": recent},
+        ]))
+    out = await tools.get_receivables(client, min_days_overdue=7)
+    assert out["count"] == 1
+    assert out["receivables"][0]["DaysOverdue"] == 15
+
+
+# --- update_product ---
+
+@respx.mock
+async def test_update_product_merges_and_puts(client):
+    _token()
+    respx.get(f"{BASE}/api/v3/Product/Code").mock(
+        return_value=httpx.Response(200, json={
+            "Code": "P01", "Name": "Old Name", "Brand": "DD", "Variants": []}))
+    route = respx.put(f"{BASE}/api/v3/Product").mock(
+        return_value=httpx.Response(200, json={"Code": "P01"}))
+    out = await tools.update_product(client, "P01", {"Name": "New Name"})
+    assert out["Code"] == "P01"
+    body = _json.loads(route.calls[0].request.content)
+    assert body["Name"] == "New Name"
+    assert body["Brand"] == "DD"        # existing field preserved
+
+
+# --- get_inventory_by_codes ---
+
+@respx.mock
+async def test_get_inventory_by_codes_payload(client):
+    _token()
+    route = respx.post(f"{BASE}/api/v3/Inventory/CodeArray").mock(
+        return_value=httpx.Response(200, json=[{"Code": "A"}, {"Code": "B"}]))
+    out = await tools.get_inventory_by_codes(client, ["A", "B"])
+    body = _json.loads(route.calls[0].request.content)
+    assert body["Codes"] == ["A", "B"]
+    assert len(out) == 2
+
+
+@respx.mock
+async def test_get_inventory_by_codes_outlet(client):
+    _token()
+    route = respx.post(f"{BASE}/api/v3/Inventory/CodeArray").mock(
+        return_value=httpx.Response(200, json=[]))
+    await tools.get_inventory_by_codes(client, ["X"], outlet="MF01")
+    body = _json.loads(route.calls[0].request.content)
+    assert body["Outlet"] == "MF01"
+
+
+# --- get_inventory_log ---
+
+@respx.mock
+async def test_get_inventory_log_no_filter(client):
+    _token()
+    route = respx.get(f"{BASE}/api/v3/Inventory/Log").mock(
+        return_value=httpx.Response(200, json=[{"Code": "A", "Change": -1}]))
+    out = await tools.get_inventory_log(client)
+    p = route.calls[0].request.url.params
+    assert p["PageNumber"] == "1"
+    assert "Code" not in p
+    assert len(out) == 1
+
+
+@respx.mock
+async def test_get_inventory_log_code_and_dates(client):
+    _token()
+    route = respx.get(f"{BASE}/api/v3/Inventory/Log").mock(
+        return_value=httpx.Response(200, json=[]))
+    await tools.get_inventory_log(client, code="VNL-001",
+                                   date_from="2026-01-01", date_to="2026-06-30")
+    p = route.calls[0].request.url.params
+    assert p["Code"] == "VNL-001"
+    assert p["From"] == "2026-01-01"
+    assert p["To"] == "2026-06-30"
+
+
+# --- adjust_stock ---
+
+@respx.mock
+async def test_adjust_stock_payload(client):
+    _token()
+    route = respx.post(f"{BASE}/api/v3/Adjustment").mock(
+        return_value=httpx.Response(200, json={"ID": "adj-1"}))
+    items = [{"code": "VNL-001", "qty": 5, "reason": "Restock"}]
+    await tools.adjust_stock(client, items, notes="Weekly restock")
+    body = _json.loads(route.calls[0].request.content)
+    assert body["Details"][0]["Code"] == "VNL-001"
+    assert body["Details"][0]["Quantity"] == 5
+    assert body["Details"][0]["Notes"] == "Restock"
+    assert body["Notes"] == "Weekly restock"
+
+
+@respx.mock
+async def test_adjust_stock_negative_qty(client):
+    _token()
+    route = respx.post(f"{BASE}/api/v3/Adjustment").mock(
+        return_value=httpx.Response(200, json={"ID": "adj-2"}))
+    await tools.adjust_stock(client, [{"code": "CD-001", "qty": -3, "reason": "Damaged"}])
+    body = _json.loads(route.calls[0].request.content)
+    assert body["Details"][0]["Quantity"] == -3
+
+
+@respx.mock
+async def test_adjust_stock_multi_item(client):
+    _token()
+    route = respx.post(f"{BASE}/api/v3/Adjustment").mock(
+        return_value=httpx.Response(200, json={"ID": "adj-3"}))
+    items = [{"code": "A", "qty": 10}, {"code": "B", "qty": -2, "reason": "Fix"}]
+    await tools.adjust_stock(client, items, notes="Batch")
+    body = _json.loads(route.calls[0].request.content)
+    assert len(body["Details"]) == 2
+    assert body["Details"][1]["Code"] == "B"
+
+
+# --- get_inbound_logistics ---
+
+@respx.mock
+async def test_get_inbound_logistics_date_filter(client):
+    _token()
+    route = respx.get(f"{BASE}/api/v3/InboundLogistic").mock(
+        return_value=httpx.Response(200, json=[{"ID": "IL-001"}]))
+    out = await tools.get_inbound_logistics(client, date_from="2026-06-01",
+                                             date_to="2026-06-30")
+    p = route.calls[0].request.url.params
+    assert p["From"] == "2026-06-01" and p["To"] == "2026-06-30"
+    assert len(out) == 1
+
+
+# --- create_inbound_logistic ---
+
+@respx.mock
+async def test_create_inbound_logistic_payload(client):
+    _token()
+    route = respx.post(f"{BASE}/api/v3/InboundLogistic").mock(
+        return_value=httpx.Response(200, json={"ID": "il-1"}))
+    items = [{"code": "VNL-001", "qty": 10, "unit_cost": 50000}]
+    await tools.create_inbound_logistic(client, items,
+                                        supplier_code="SUP-01", notes="PO #123")
+    body = _json.loads(route.calls[0].request.content)
+    assert body["Details"][0]["Code"] == "VNL-001"
+    assert body["Details"][0]["Quantity"] == 10
+    assert body["Details"][0]["UnitCost"] == 50000
+    assert body["SupplierCode"] == "SUP-01"
+    assert body["Notes"] == "PO #123"
+
+
+@respx.mock
+async def test_create_inbound_logistic_no_supplier(client):
+    _token()
+    route = respx.post(f"{BASE}/api/v3/InboundLogistic").mock(
+        return_value=httpx.Response(200, json={"ID": "il-2"}))
+    await tools.create_inbound_logistic(client, [{"code": "X", "qty": 1}])
+    body = _json.loads(route.calls[0].request.content)
+    assert "SupplierCode" not in body
+    assert body["Details"][0]["UnitCost"] == 0
