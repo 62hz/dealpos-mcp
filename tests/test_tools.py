@@ -49,11 +49,37 @@ async def test_check_low_stock_uses_threshold_then_fallback(client):
 async def test_list_products_passes_required_paging(client):
     _token()
     route = respx.get("https://doubledeer.dealpos.co.id/api/v3/Product").mock(
-        return_value=httpx.Response(200, json=[{"Name": "Vinyl A", "Code": "VA"}]))
+        return_value=httpx.Response(200, json={
+            "DataArray": [{"Name": "Vinyl A", "Code": "VA"}], "RecordsCount": -1}))
     out = await tools.list_products(client, name="Vinyl")
     assert out[0]["Code"] == "VA"
     q = route.calls[0].request.url.params
-    assert q["PageNumber"] == "1" and q["PageSize"] == "50" and q["Name"] == "Vinyl"
+    assert q["PageNumber"] == "1" and q["PageSize"] == "500" and q["Name"] == "Vinyl"
+
+
+@respx.mock
+async def test_list_products_unwraps_dataarray_envelope(client):
+    _token()
+    respx.get("https://doubledeer.dealpos.co.id/api/v3/Product").mock(
+        return_value=httpx.Response(200, json={
+            "DataArray": [{"Code": "A"}, {"Code": "B"}], "RecordsCount": -1}))
+    out = await tools.list_products(client)
+    assert [p["Code"] for p in out] == ["A", "B"]
+
+
+@respx.mock
+async def test_list_products_paginates_past_full_page(client):
+    _token()
+    route = respx.get("https://doubledeer.dealpos.co.id/api/v3/Product").mock(
+        side_effect=[
+            httpx.Response(200, json={"DataArray": [{"Code": str(i)} for i in range(500)],
+                                       "RecordsCount": -1}),
+            httpx.Response(200, json={"DataArray": [{"Code": "500"}], "RecordsCount": -1}),
+        ])
+    out = await tools.list_products(client)
+    assert len(out) == 501
+    assert route.call_count == 2
+    assert route.calls[1].request.url.params["PageNumber"] == "2"
 
 
 @respx.mock
@@ -155,6 +181,20 @@ async def test_list_inventory_category_param(client):
         return_value=httpx.Response(200, json=[]))
     await tools.list_inventory(client, category="Music/Vinyl")
     assert route.calls[0].request.url.params["Category"] == "Music/Vinyl"
+
+
+@respx.mock
+async def test_list_inventory_paginates_past_full_page(client):
+    _token()
+    route = respx.get(f"{BASE}/api/v3/Inventory").mock(
+        side_effect=[
+            httpx.Response(200, json=[{"Code": str(i)} for i in range(500)]),
+            httpx.Response(200, json=[{"Code": "500"}]),
+        ])
+    out = await tools.list_inventory(client)
+    assert len(out) == 501
+    assert route.call_count == 2
+    assert route.calls[1].request.url.params["PageNumber"] == "2"
 
 
 # --- list_customers ---
@@ -366,7 +406,7 @@ async def test_get_inventory_by_codes_payload(client):
         return_value=httpx.Response(200, json=[{"Code": "A"}, {"Code": "B"}]))
     out = await tools.get_inventory_by_codes(client, ["A", "B"])
     body = _json.loads(route.calls[0].request.content)
-    assert body["Codes"] == ["A", "B"]
+    assert body["Code"] == ["A", "B"]
     assert len(out) == 2
 
 

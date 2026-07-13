@@ -36,16 +36,25 @@ async def get_daily_sales(client: DealPOSClient, year: int, outlet: str | None =
 
 # --- inventory ---
 
-async def list_inventory(client: DealPOSClient, page_size: int = 200,
+async def list_inventory(client: DealPOSClient, page_size: int = 500,
                          outlet: str | None = None, category: str | None = None) -> list[dict]:
-    """Fetch inventory rows (capped at 500/page by the API)."""
-    params: dict = {"PageNumber": 1, "PageSize": min(page_size, 500)}
-    if outlet:
-        params["ListOutlet"] = outlet
-    if category:
-        params["Category"] = category
-    rows = await client.request("GET", "/api/v3/Inventory", params=params)
-    return rows if isinstance(rows, list) else []
+    """Fetch all inventory rows, auto-paginating past the API's per-page cap."""
+    page_size = min(page_size, 500)
+    all_rows: list[dict] = []
+    page = 1
+    while True:
+        params: dict = {"PageNumber": page, "PageSize": page_size}
+        if outlet:
+            params["ListOutlet"] = outlet
+        if category:
+            params["Category"] = category
+        rows = await client.request("GET", "/api/v3/Inventory", params=params)
+        rows = rows if isinstance(rows, list) else []
+        all_rows.extend(rows)
+        if len(rows) < page_size:
+            break
+        page += 1
+    return all_rows
 
 
 async def check_low_stock(client: DealPOSClient, fallback_threshold: int | None = None,
@@ -68,15 +77,29 @@ async def check_low_stock(client: DealPOSClient, fallback_threshold: int | None 
 # --- products read ---
 
 async def list_products(client: DealPOSClient, name: str | None = None,
-                        category: str | None = None, page_size: int = 50) -> list[dict]:
-    """List catalogue products, optionally filtered by name/category."""
-    params: dict = {"PageNumber": 1, "PageSize": page_size}
-    if name:
-        params["Name"] = name
-    if category:
-        params["Category"] = category
-    rows = await client.request("GET", "/api/v3/Product", params=params)
-    return rows if isinstance(rows, list) else []
+                        category: str | None = None, page_size: int = 500) -> list[dict]:
+    """List all catalogue products, optionally filtered by name/category.
+
+    The API wraps results as ``{"DataArray": [...], "RecordsCount": -1}`` rather than
+    a bare list, and ``RecordsCount`` is unreliable (-1), so pagination stops on a
+    short page rather than a total count.
+    """
+    page_size = min(page_size, 500)
+    all_rows: list[dict] = []
+    page = 1
+    while True:
+        params: dict = {"PageNumber": page, "PageSize": page_size}
+        if name:
+            params["Name"] = name
+        if category:
+            params["Category"] = category
+        data = await client.request("GET", "/api/v3/Product", params=params)
+        rows = data.get("DataArray", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+        all_rows.extend(rows)
+        if len(rows) < page_size:
+            break
+        page += 1
+    return all_rows
 
 
 async def get_product(client: DealPOSClient, code: str) -> dict:
@@ -269,7 +292,7 @@ async def update_product(client: DealPOSClient, code: str, fields: dict) -> dict
 async def get_inventory_by_codes(client: DealPOSClient, codes: list[str],
                                   outlet: str | None = None) -> list[dict]:
     """Batch stock lookup for multiple product codes in a single API call."""
-    body: dict = {"Codes": codes}
+    body: dict = {"Code": codes}
     if outlet:
         body["Outlet"] = outlet
     rows = await client.request("POST", "/api/v3/Inventory/CodeArray", json=body)
