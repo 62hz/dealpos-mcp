@@ -51,7 +51,7 @@ async def test_list_products_passes_required_paging(client):
     route = respx.get("https://doubledeer.dealpos.co.id/api/v3/Product").mock(
         return_value=httpx.Response(200, json={
             "DataArray": [{"Name": "Vinyl A", "Code": "VA"}], "RecordsCount": -1}))
-    out = await tools.list_products(client, name="Vinyl")
+    out = await tools.list_products(client, name="Vinyl", compact=False)
     assert out[0]["Code"] == "VA"
     q = route.calls[0].request.url.params
     assert q["PageNumber"] == "1" and q["PageSize"] == "500" and q["Name"] == "Vinyl"
@@ -63,7 +63,7 @@ async def test_list_products_unwraps_dataarray_envelope(client):
     respx.get("https://doubledeer.dealpos.co.id/api/v3/Product").mock(
         return_value=httpx.Response(200, json={
             "DataArray": [{"Code": "A"}, {"Code": "B"}], "RecordsCount": -1}))
-    out = await tools.list_products(client)
+    out = await tools.list_products(client, compact=False)
     assert [p["Code"] for p in out] == ["A", "B"]
 
 

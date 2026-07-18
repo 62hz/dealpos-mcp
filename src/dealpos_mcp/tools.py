@@ -80,7 +80,6 @@ def _compact_product(p: dict) -> dict:
     """Strip Description/ImageURL/ThumbnailURL — the bulk of a bare list_products payload."""
     return {
         "ID": p.get("ID"),
-        "Code": p.get("Code"),
         "Category": p.get("Category"),
         "Name": p.get("Name"),
         "Brand": p.get("Brand"),
