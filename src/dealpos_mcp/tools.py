@@ -77,7 +77,9 @@ async def check_low_stock(client: DealPOSClient, fallback_threshold: int | None 
 # --- products read ---
 
 def _compact_product(p: dict) -> dict:
-    """Strip Description/ImageURL/ThumbnailURL — the bulk of a bare list_products payload."""
+    """Keep only ID, Category, Name, Brand, SupplierName, Released, Discontinued, and a
+    trimmed Variants list — any other field (including Description/ImageURL/ThumbnailURL)
+    is dropped."""
     return {
         "ID": p.get("ID"),
         "Category": p.get("Category"),
@@ -109,11 +111,12 @@ async def list_products(client: DealPOSClient, name: str | None = None,
     a bare list, and ``RecordsCount`` is unreliable (-1), so pagination stops on a
     short page rather than a total count.
 
-    By default (``compact=True``) each product/variant is stripped of
-    ``Description``/``ImageURL``/``ThumbnailURL`` before returning — those fields make up
-    most of the payload size on a full-catalog pull and are rarely needed for analysis.
-    Pass ``compact=False`` to get the raw API objects (e.g. before calling
-    ``update_product`` on a specific item).
+    By default (``compact=True``) each product/variant is reduced to a whitelist of
+    fields — product: ID, Category, Name, Brand, SupplierName, Released, Discontinued,
+    Variants; variant: ID, Code, Model, UnitCost, UnitPrice, Discontinued. Any other
+    field (including Description/ImageURL/ThumbnailURL, which make up most of the
+    payload size on a full-catalog pull) is dropped. Pass ``compact=False`` to get the
+    raw API objects (e.g. before calling ``update_product`` on a specific item).
     """
     page_size = min(page_size, 500)
     all_rows: list[dict] = []

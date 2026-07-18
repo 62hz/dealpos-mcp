@@ -31,8 +31,10 @@ async def check_low_stock(fallback_threshold: int | None = None, outlet: str | N
 async def list_products(name: str | None = None, category: str | None = None,
                         compact: bool = True) -> list[dict]:
     """List catalogue products, optionally filtered by name or category.
-    compact=True (default) strips Description/ImageURL fields to save tokens on
-    full-catalog pulls — set compact=False when you need the raw product record."""
+    compact=True (default) keeps only a whitelist of fields (ID, Category, Name, Brand,
+    SupplierName, Released, Discontinued, Variants) — dropping everything else, including
+    Description/ImageURL/ThumbnailURL, to save tokens on full-catalog pulls. Set
+    compact=False when you need the raw product record."""
     return await tools.list_products(_client, name, category, compact=compact)
 
 
