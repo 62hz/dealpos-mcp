@@ -526,3 +526,63 @@ async def test_create_inbound_logistic_no_supplier(client):
     body = _json.loads(route.calls[0].request.content)
     assert "SupplierCode" not in body
     assert body["Details"][0]["UnitCost"] == 0
+
+
+# --- list_products compact flag ---
+
+@respx.mock
+async def test_list_products_compact_strips_heavy_fields(client):
+    _token()
+    respx.get("https://doubledeer.dealpos.co.id/api/v3/Product").mock(
+        return_value=httpx.Response(200, json={
+            "DataArray": [{
+                "ID": "p1", "Category": "Vinyl Import", "Name": "Vinyl A",
+                "Brand": "Test Brand", "SupplierName": "Test Supplier",
+                "Released": "2026-06-06T00:00:00", "Discontinued": False,
+                "Description": "A" * 500,
+                "ImageURL": "https://cdn.example.com/" + "x" * 200,
+                "ThumbnailURL": "https://cdn.example.com/thumb/" + "x" * 200,
+                "Variants": [{
+                    "ID": "v1", "Code": "VA", "Model": "Default",
+                    "UnitCost": 100000, "UnitPrice": 150000,
+                    "Discontinued": False,
+                    "Description": "variant desc " * 20,
+                    "ImageURL": "https://cdn.example.com/variant/" + "y" * 200,
+                }],
+            }],
+            "RecordsCount": -1,
+        }))
+    out = await tools.list_products(client)
+    assert len(out) == 1
+    p = out[0]
+    assert p["Name"] == "Vinyl A"
+    assert p["Category"] == "Vinyl Import"
+    assert p["Brand"] == "Test Brand"
+    assert p["SupplierName"] == "Test Supplier"
+    assert p["Released"] == "2026-06-06T00:00:00"
+    assert "Description" not in p
+    assert "ImageURL" not in p
+    assert "ThumbnailURL" not in p
+    v = p["Variants"][0]
+    assert v["Code"] == "VA"
+    assert v["UnitPrice"] == 150000
+    assert v["UnitCost"] == 100000
+    assert "Description" not in v
+    assert "ImageURL" not in v
+
+
+@respx.mock
+async def test_list_products_compact_false_returns_raw(client):
+    _token()
+    respx.get("https://doubledeer.dealpos.co.id/api/v3/Product").mock(
+        return_value=httpx.Response(200, json={
+            "DataArray": [{
+                "ID": "p1", "Category": "Vinyl Import", "Name": "Vinyl A",
+                "Description": "full description", "ImageURL": "https://cdn.example.com/img.jpg",
+                "Variants": [{"ID": "v1", "Code": "VA", "Description": "variant desc"}],
+            }],
+            "RecordsCount": -1,
+        }))
+    out = await tools.list_products(client, compact=False)
+    assert out[0]["Description"] == "full description"
+    assert out[0]["Variants"][0]["Description"] == "variant desc"

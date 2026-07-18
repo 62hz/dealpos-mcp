@@ -76,13 +76,45 @@ async def check_low_stock(client: DealPOSClient, fallback_threshold: int | None 
 
 # --- products read ---
 
+def _compact_product(p: dict) -> dict:
+    """Strip Description/ImageURL/ThumbnailURL — the bulk of a bare list_products payload."""
+    return {
+        "ID": p.get("ID"),
+        "Code": p.get("Code"),
+        "Category": p.get("Category"),
+        "Name": p.get("Name"),
+        "Brand": p.get("Brand"),
+        "SupplierName": p.get("SupplierName"),
+        "Released": p.get("Released"),
+        "Discontinued": p.get("Discontinued"),
+        "Variants": [
+            {
+                "ID": v.get("ID"),
+                "Code": v.get("Code"),
+                "Model": v.get("Model"),
+                "UnitCost": v.get("UnitCost"),
+                "UnitPrice": v.get("UnitPrice"),
+                "Discontinued": v.get("Discontinued"),
+            }
+            for v in (p.get("Variants") or [])
+        ],
+    }
+
+
 async def list_products(client: DealPOSClient, name: str | None = None,
-                        category: str | None = None, page_size: int = 500) -> list[dict]:
+                        category: str | None = None, page_size: int = 500,
+                        compact: bool = True) -> list[dict]:
     """List all catalogue products, optionally filtered by name/category.
 
     The API wraps results as ``{"DataArray": [...], "RecordsCount": -1}`` rather than
     a bare list, and ``RecordsCount`` is unreliable (-1), so pagination stops on a
     short page rather than a total count.
+
+    By default (``compact=True``) each product/variant is stripped of
+    ``Description``/``ImageURL``/``ThumbnailURL`` before returning — those fields make up
+    most of the payload size on a full-catalog pull and are rarely needed for analysis.
+    Pass ``compact=False`` to get the raw API objects (e.g. before calling
+    ``update_product`` on a specific item).
     """
     page_size = min(page_size, 500)
     all_rows: list[dict] = []
@@ -99,6 +131,8 @@ async def list_products(client: DealPOSClient, name: str | None = None,
         if len(rows) < page_size:
             break
         page += 1
+    if compact:
+        all_rows = [_compact_product(p) for p in all_rows]
     return all_rows
 
 

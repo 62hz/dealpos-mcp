@@ -28,9 +28,12 @@ async def check_low_stock(fallback_threshold: int | None = None, outlet: str | N
 
 
 @mcp.tool()
-async def list_products(name: str | None = None, category: str | None = None) -> list[dict]:
-    """List catalogue products, optionally filtered by name or category."""
-    return await tools.list_products(_client, name, category)
+async def list_products(name: str | None = None, category: str | None = None,
+                        compact: bool = True) -> list[dict]:
+    """List catalogue products, optionally filtered by name or category.
+    compact=True (default) strips Description/ImageURL fields to save tokens on
+    full-catalog pulls — set compact=False when you need the raw product record."""
+    return await tools.list_products(_client, name, category, compact=compact)
 
 
 @mcp.tool()
