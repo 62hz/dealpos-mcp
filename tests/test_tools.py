@@ -19,12 +19,16 @@ async def test_get_sales_summary_returns_totals_and_top(client):
     _token()
     respx.get("https://doubledeer.dealpos.co.id/api/v3/Report/ProductSold").mock(
         return_value=httpx.Response(200, json=[
-            {"Variant": "Vinyl A", "Code": "VA", "Quantity": 10, "NetSales": 3500000},
-            {"Variant": "Vinyl B", "Code": "VB", "Quantity": 4, "NetSales": 1200000}]))
+            {"Name": "Vinyl A", "Code": "VA", "Quantity": 10,
+             "Cost": 2000000, "Sales": 3500000, "Profit": 1500000},
+            {"Name": "Vinyl B", "Code": "VB", "Quantity": 4,
+             "Cost": 700000, "Sales": 1200000, "Profit": 500000}]))
     out = await tools.get_sales_summary(client, date_from="2026-06-23", date_to="2026-06-29")
     assert out["total_qty"] == 14
     assert out["total_net_sales"] == 4700000
-    assert out["top_item"]["Variant"] == "Vinyl A"
+    assert out["top_item"]["Name"] == "Vinyl A"
+    assert out["total_cost"] == 2700000
+    assert out["total_profit"] == 2000000
     assert len(out["items"]) == 2
 
 
@@ -249,10 +253,14 @@ async def test_list_categories(client):
 @respx.mock
 async def test_list_outlets(client):
     _token()
-    respx.get(f"{BASE}/api/v3/Outlet").mock(
-        return_value=httpx.Response(200, json=[{"ID": "MF01", "Name": "Medium Format"}]))
+    route = respx.get(f"{BASE}/api/v3/Outlet").mock(
+        return_value=httpx.Response(200, json=[
+            {"ID": "410ba2b7-8eff-4759-b5f1-cf47b33ef1cc", "Name": "MF Store",
+             "Code": "B1", "Suspended": False}]))
     out = await tools.list_outlets(client)
-    assert out[0]["Name"] == "Medium Format"
+    assert out[0]["Name"] == "MF Store"
+    # bare GET 400s: Suspended is required and must be a bool-ish string
+    assert route.calls[0].request.url.params["Suspended"] == "false"
 
 
 @respx.mock
@@ -269,9 +277,9 @@ async def test_list_suppliers(client):
 @respx.mock
 async def test_get_writeoffs_sums_total(client):
     _token()
-    respx.get(f"{BASE}/api/v3/InvoiceWriteOff").mock(
+    respx.get(f"{BASE}/api/v3/WriteOff/Invoice").mock(
         return_value=httpx.Response(200, json=[
-            {"Total": 10000}, {"Total": 5000}]))
+            {"Amount": 10000, "Tag": "Biaya Admin Tiktok"}, {"Amount": 5000, "Tag": "Bad Debt"}]))
     out = await tools.get_writeoffs(client, "2026-01-01", "2026-06-30")
     assert out["total"] == 15000.0
     assert out["count"] == 2
@@ -281,7 +289,7 @@ async def test_get_writeoffs_sums_total(client):
 @respx.mock
 async def test_get_writeoffs_empty(client):
     _token()
-    respx.get(f"{BASE}/api/v3/InvoiceWriteOff").mock(
+    respx.get(f"{BASE}/api/v3/WriteOff/Invoice").mock(
         return_value=httpx.Response(200, json=[]))
     out = await tools.get_writeoffs(client, "2026-01-01", "2026-06-30")
     assert out["total"] == 0.0
@@ -291,7 +299,7 @@ async def test_get_writeoffs_empty(client):
 @respx.mock
 async def test_get_writeoffs_date_params(client):
     _token()
-    route = respx.get(f"{BASE}/api/v3/InvoiceWriteOff").mock(
+    route = respx.get(f"{BASE}/api/v3/WriteOff/Invoice").mock(
         return_value=httpx.Response(200, json=[]))
     await tools.get_writeoffs(client, "2026-06-01", "2026-06-30")
     p = route.calls[0].request.url.params
@@ -300,55 +308,67 @@ async def test_get_writeoffs_date_params(client):
 
 # --- list_invoices ---
 
-@respx.mock
-async def test_list_invoices_sums_net(client):
-    _token()
-    respx.get(f"{BASE}/api/v3/Invoice").mock(
+def _outlets():
+    """Mock the outlet lookup list_invoices needs to resolve OutletID."""
+    respx.get(f"{BASE}/api/v3/Outlet").mock(
         return_value=httpx.Response(200, json=[
-            {"NetSales": 100000}, {"NetSales": 50000}]))
+            {"ID": "410ba2b7-8eff-4759-b5f1-cf47b33ef1cc", "Name": "MF Store",
+             "Code": "B1", "Suspended": False}]))
+
+
+@respx.mock
+async def test_list_invoices_sums_total_from_envelope(client):
+    _token(); _outlets()
+    respx.get(f"{BASE}/api/v3/Invoice/WithTotalCount").mock(
+        return_value=httpx.Response(200, json={
+            "Data": [{"Number": "B1.26.08.00005", "Total": 100000},
+                     {"Number": "B1.26.08.00006", "Total": 50000}],
+            "TotalCount": 2}))
     out = await tools.list_invoices(client, date_from="2026-01-01", date_to="2026-06-30")
     assert out["total_net"] == 150000.0
     assert out["count"] == 2
+    assert out["total_count"] == 2
 
 
 @respx.mock
-async def test_list_invoices_customer_code_param(client):
-    _token()
-    route = respx.get(f"{BASE}/api/v3/Invoice").mock(
-        return_value=httpx.Response(200, json=[]))
-    await tools.list_invoices(client, customer_code="C001")
-    assert route.calls[0].request.url.params["CustomerCode"] == "C001"
+async def test_list_invoices_sends_outlet_guid_not_name(client):
+    """Regression: the endpoint 500s on an outlet NAME — it needs the GUID."""
+    _token(); _outlets()
+    route = respx.get(f"{BASE}/api/v3/Invoice/WithTotalCount").mock(
+        return_value=httpx.Response(200, json={"Data": [], "TotalCount": 0}))
+    await tools.list_invoices(client, date_from="2026-01-01", date_to="2026-06-30",
+                              outlet="MF Store")
+    p = route.calls[0].request.url.params
+    assert p["OutletID"] == "410ba2b7-8eff-4759-b5f1-cf47b33ef1cc"
+    assert "Outlet" not in p
 
 
 @respx.mock
-async def test_list_invoices_has_pagination(client):
-    _token()
-    route = respx.get(f"{BASE}/api/v3/Invoice").mock(
-        return_value=httpx.Response(200, json=[]))
-    await tools.list_invoices(client)
+async def test_list_invoices_always_sends_paging_and_dates(client):
+    """Regression: missing paging -> 400, missing dates -> 500."""
+    _token(); _outlets()
+    route = respx.get(f"{BASE}/api/v3/Invoice/WithTotalCount").mock(
+        return_value=httpx.Response(200, json={"Data": [], "TotalCount": 0}))
+    await tools.list_invoices(client, date_from="2026-06-01", date_to="2026-06-30")
     p = route.calls[0].request.url.params
     assert p["PageNumber"] == "1" and p["PageSize"] == "50"
+    assert p["From"] == "2026-06-01" and p["To"] == "2026-06-30"
+
+
+@respx.mock
+async def test_list_invoices_unknown_outlet_raises(client):
+    _token(); _outlets()
+    with pytest.raises(DealPOSError, match="not found"):
+        await tools.list_invoices(client, date_from="2026-06-01", date_to="2026-06-30",
+                                  outlet="Nonexistent Outlet")
 
 
 # --- list_sales_orders ---
 
-@respx.mock
-async def test_list_sales_orders_status_filter(client):
-    _token()
-    route = respx.get(f"{BASE}/api/v3/SalesOrder").mock(
-        return_value=httpx.Response(200, json=[{"ID": "SO-001"}]))
-    out = await tools.list_sales_orders(client, status="Pending")
-    assert route.calls[0].request.url.params["Status"] == "Pending"
-    assert len(out) == 1
-
-
-@respx.mock
-async def test_list_sales_orders_non_list(client):
-    _token()
-    respx.get(f"{BASE}/api/v3/SalesOrder").mock(
-        return_value=httpx.Response(200, json={}))
-    out = await tools.list_sales_orders(client)
-    assert out == []
+async def test_list_sales_orders_raises_not_available(client):
+    """DealPOS exposes /SalesOrder for POST/DELETE only; POST there CREATES an order."""
+    with pytest.raises(DealPOSError, match="not available"):
+        await tools.list_sales_orders(client)
 
 
 # --- get_receivables ---
@@ -483,6 +503,37 @@ async def test_adjust_stock_multi_item(client):
     body = _json.loads(route.calls[0].request.content)
     assert len(body["Details"]) == 2
     assert body["Details"][1]["Code"] == "B"
+
+
+@respx.mock
+async def test_adjust_stock_sends_outlet_and_reference():
+    _token()
+    c = DealPOSClient(Settings(subdomain="doubledeer.dealpos.co.id", client_id="cid",
+                               client_secret="sec", default_outlet="MF Store", _env_file=None))
+    route = respx.post(f"{BASE}/api/v3/Adjustment").mock(
+        return_value=httpx.Response(200, json={"ID": "adj-4"}))
+    await tools.adjust_stock(c, [{"code": "A", "qty": 1}], reference="ADJ-TEST-0001")
+    body = _json.loads(route.calls[0].request.content)
+    assert body["Outlet"] == "MF Store"
+    assert body["Number"] == "ADJ-TEST-0001"
+
+
+@respx.mock
+async def test_adjust_stock_generates_reference_when_omitted():
+    _token()
+    c = DealPOSClient(Settings(subdomain="doubledeer.dealpos.co.id", client_id="cid",
+                               client_secret="sec", default_outlet="MF Store", _env_file=None))
+    route = respx.post(f"{BASE}/api/v3/Adjustment").mock(
+        return_value=httpx.Response(200, json={"ID": "adj-5"}))
+    await tools.adjust_stock(c, [{"code": "A", "qty": 1}])
+    body = _json.loads(route.calls[0].request.content)
+    assert body["Number"].startswith("ADJ-")
+
+
+async def test_adjust_stock_requires_default_outlet():
+    c = DealPOSClient(Settings(subdomain="x", client_id="a", client_secret="b", _env_file=None))
+    with pytest.raises(DealPOSError):
+        await tools.adjust_stock(c, [{"code": "A", "qty": 1}])
 
 
 # --- get_inbound_logistics ---

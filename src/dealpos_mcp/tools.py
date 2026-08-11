@@ -10,19 +10,83 @@ def _num(v) -> float:
 
 # --- sales reports ---
 
-async def get_sales_summary(client: DealPOSClient, date_from: str, date_to: str,
-                            outlet: str | None = None) -> dict:
-    """Product-sold summary between two YYYY-MM-DD dates."""
-    params = {"From": date_from, "To": date_to}
+_PRODUCT_SOLD_CAP = 100  # Report/ProductSold returns at most 100 rows and ignores paging
+
+
+async def _product_sold_chunked(client: DealPOSClient, date_from: str, date_to: str,
+                                outlet: str | None, _depth: int = 0) -> tuple[list[dict], bool]:
+    """Fetch Report/ProductSold, splitting the date range around the 100-row cap.
+
+    The endpoint silently truncates at 100 rows and IGNORES PageNumber/PageSize
+    (verified 2026-08-02: PageSize=500 and page=2/3 all return the identical
+    first 100 rows). Splitting the date range is the only way to see everything.
+
+    Returns (rows, truncated). `truncated` is True only if a single day still
+    hits the cap, which no split can fix.
+    """
+    from datetime import date, timedelta
+
+    params: dict = {"From": date_from, "To": date_to}
     if outlet:
         params["Outlet"] = outlet
     rows = await client.request("GET", "/api/v3/Report/ProductSold", params=params)
     rows = rows if isinstance(rows, list) else []
+
+    if len(rows) < _PRODUCT_SOLD_CAP:
+        return rows, False
+
+    try:
+        d0 = date.fromisoformat(date_from)
+        d1 = date.fromisoformat(date_to)
+    except ValueError:
+        return rows, True
+    if d0 >= d1 or _depth >= 12:
+        # A single day at the cap cannot be split further.
+        return rows, True
+
+    mid = d0 + (d1 - d0) // 2
+    left, t_l = await _product_sold_chunked(client, d0.isoformat(), mid.isoformat(),
+                                            outlet, _depth + 1)
+    right, t_r = await _product_sold_chunked(client, (mid + timedelta(days=1)).isoformat(),
+                                             d1.isoformat(), outlet, _depth + 1)
+
+    merged: dict[str, dict] = {}
+    for r in left + right:
+        key = str(r.get("Code") or r.get("Name") or id(r))
+        if key in merged:
+            m = merged[key]
+            for f in ("Quantity", "Sales", "Cost", "Profit"):
+                if f in r or f in m:
+                    m[f] = _num(m.get(f)) + _num(r.get(f))
+        else:
+            merged[key] = dict(r)
+    return list(merged.values()), (t_l or t_r)
+
+
+async def get_sales_summary(client: DealPOSClient, date_from: str, date_to: str,
+                            outlet: str | None = None) -> dict:
+    """Product-sold summary between two YYYY-MM-DD dates (inclusive).
+
+    Auto-splits the range to work around the endpoint's silent 100-row cap.
+    """
+    rows, truncated = await _product_sold_chunked(client, date_from, date_to, outlet)
     total_qty = sum(_num(r.get("Quantity")) for r in rows)
-    total_net = sum(_num(r.get("NetSales")) for r in rows)
+    # Report/ProductSold returns Sales/Cost/Profit. An earlier version summed
+    # "NetSales", a field this endpoint never returns, so every summary reported
+    # Rp0 revenue while listing non-zero line items. Verified 2026-08-02 against
+    # the live API: keys are Name, Code, Quantity, Cost, Sales, Profit.
+    total_net = sum(_num(r.get("Sales")) for r in rows)
+    total_cost = sum(_num(r.get("Cost")) for r in rows)
+    total_profit = sum(_num(r.get("Profit")) for r in rows)
     top = max(rows, key=lambda r: _num(r.get("Quantity")), default=None)
-    return {"date_from": date_from, "date_to": date_to, "total_qty": total_qty,
-            "total_net_sales": total_net, "top_item": top, "items": rows}
+    out = {"date_from": date_from, "date_to": date_to, "total_qty": total_qty,
+           "total_net_sales": total_net, "total_cost": total_cost,
+           "total_profit": total_profit, "top_item": top, "items": rows}
+    if truncated:
+        out["truncated"] = True
+        out["warning"] = ("A single day hit the 100-row cap, so these totals are "
+                          "INCOMPLETE and under-report actual sales.")
+    return out
 
 
 async def get_daily_sales(client: DealPOSClient, year: int, outlet: str | None = None) -> dict:
@@ -221,10 +285,27 @@ async def list_categories(client: DealPOSClient) -> list[dict]:
     return rows if isinstance(rows, list) else []
 
 
-async def list_outlets(client: DealPOSClient) -> list[dict]:
-    """List all outlets/locations."""
-    rows = await client.request("GET", "/api/v3/Outlet")
+async def list_outlets(client: DealPOSClient, include_suspended: bool = False) -> list[dict]:
+    """List outlets/locations. Returns ID (GUID), Name, Code, Suspended."""
+    # /api/v3/Outlet rejects a bare GET with 400 "Suspended value is not a valid
+    # Boolean" — the param is required and must be the string "true"/"false".
+    params = {"Suspended": "true" if include_suspended else "false"}
+    rows = await client.request("GET", "/api/v3/Outlet", params=params)
     return rows if isinstance(rows, list) else []
+
+
+async def _resolve_outlet_id(client: DealPOSClient, outlet: str | None) -> str:
+    """Map an outlet NAME to its GUID. Several endpoints require OutletID, not Outlet."""
+    rows = await list_outlets(client)
+    if not rows:
+        raise DealPOSError("No outlets returned by DealPOS — cannot resolve OutletID.")
+    if outlet:
+        for r in rows:
+            if str(r.get("Name", "")).strip().lower() == outlet.strip().lower():
+                return str(r.get("ID"))
+        known = ", ".join(str(r.get("Name")) for r in rows)
+        raise DealPOSError(f"Outlet {outlet!r} not found. Known outlets: {known}")
+    return str(rows[0].get("ID"))
 
 
 async def list_suppliers(client: DealPOSClient) -> list[dict]:
@@ -241,7 +322,11 @@ async def get_writeoffs(client: DealPOSClient, date_from: str, date_to: str,
     params: dict = {"From": date_from, "To": date_to}
     if outlet:
         params["Outlet"] = outlet
-    rows = await client.request("GET", "/api/v3/InvoiceWriteOff", params=params)
+    # Correct path is /WriteOff/Invoice. /InvoiceWriteOff 404s, and bare
+    # /WriteOff returns write-off TYPES ("Bad Debt", "Biaya Admin Tiktok"),
+    # not transactions. Verified 2026-08-02: rows carry Number, Outlet,
+    # Customer, Created, Amount, Tag — and From/To filter correctly.
+    rows = await client.request("GET", "/api/v3/WriteOff/Invoice", params=params)
     rows = rows if isinstance(rows, list) else []
     total = sum(_num(r.get("Total") or r.get("Amount") or 0) for r in rows)
     return {
@@ -250,40 +335,61 @@ async def get_writeoffs(client: DealPOSClient, date_from: str, date_to: str,
     }
 
 
-async def list_invoices(client: DealPOSClient, date_from: str | None = None,
-                        date_to: str | None = None, customer_code: str | None = None,
-                        outlet: str | None = None, page_size: int = 50) -> dict:
-    """List invoices/transactions with optional filters."""
-    params: dict = {"PageNumber": 1, "PageSize": page_size}
-    if date_from:
-        params["From"] = date_from
-    if date_to:
-        params["To"] = date_to
+async def list_invoices(client: DealPOSClient, date_from: str, date_to: str,
+                        customer_code: str | None = None, outlet: str | None = None,
+                        page_size: int = 50, page_number: int = 1) -> dict:
+    """List invoices/transactions. date_from and date_to are REQUIRED.
+
+    Uses /api/v3/Invoice/WithTotalCount. Bare /api/v3/Invoice is the CREATE
+    endpoint (POST) and 415s on GET. Verified 2026-08-02: this endpoint needs
+    all four of OutletID (a GUID, not a name), PageNumber, PageSize, From, To —
+    omitting the dates gives 500 "Value cannot be null (Parameter 's')" and
+    omitting paging gives 400 "Page number and row count must be greater than zero".
+    """
+    outlet_id = await _resolve_outlet_id(client, outlet)
+    params: dict = {
+        "OutletID": outlet_id,
+        "PageNumber": page_number,
+        "PageSize": page_size,
+        "From": date_from,
+        "To": date_to,
+    }
     if customer_code:
         params["CustomerCode"] = customer_code
-    if outlet:
-        params["Outlet"] = outlet
-    rows = await client.request("GET", "/api/v3/Invoice", params=params)
-    rows = rows if isinstance(rows, list) else []
-    total_net = sum(_num(r.get("NetSales") or r.get("Total") or 0) for r in rows)
-    return {"count": len(rows), "total_net": total_net, "invoices": rows}
+    data = await client.request("GET", "/api/v3/Invoice/WithTotalCount", params=params)
+    # Response is an envelope: {"Data": [...], "TotalCount": n}
+    if isinstance(data, dict):
+        rows = data.get("Data") or []
+        total_count = data.get("TotalCount")
+    else:
+        rows = data if isinstance(data, list) else []
+        total_count = None
+    total_net = sum(_num(r.get("Total") or r.get("GrandTotal") or 0) for r in rows)
+    return {"count": len(rows), "total_count": total_count,
+            "total_net": total_net, "invoices": rows}
 
 
 async def list_sales_orders(client: DealPOSClient, date_from: str | None = None,
                             date_to: str | None = None, status: str | None = None,
                             outlet: str | None = None, page_size: int = 50) -> list[dict]:
     """List sales orders (online/marketplace orders)."""
-    params: dict = {"PageNumber": 1, "PageSize": page_size}
-    if date_from:
-        params["From"] = date_from
-    if date_to:
-        params["To"] = date_to
-    if status:
-        params["Status"] = status
-    if outlet:
-        params["Outlet"] = outlet
-    rows = await client.request("GET", "/api/v3/SalesOrder", params=params)
-    return rows if isinstance(rows, list) else []
+    # NOT IMPLEMENTED — deliberately.
+    #
+    # /api/v3/SalesOrder answers OPTIONS with "Allow: DELETE, POST" only; every
+    # GET variant probed on 2026-08-02 (bare, /List, /Search, /WithTotalCount,
+    # /ID, /Count, /Join, /SalesOrders, /Order, /OnlineOrder) returned 404 or 405.
+    # Per the DealPOS docs every SalesOrder operation is a POST, and POST to the
+    # bare path CREATES a sales order — so it was not probed.
+    #
+    # This is not a gap in practice: marketplace/online sales DO appear in
+    # Report/ProductSold. Verified 2026-08-02 — a TikTok sale (barcode
+    # 371156899, Rp270.000) is present there, and ProductSold reconciles exactly
+    # with Report/DailySales for the same month.
+    raise DealPOSError(
+        "list_sales_orders is not available: DealPOS exposes /api/v3/SalesOrder "
+        "for POST/DELETE only, and POST to that path creates an order. "
+        "Use get_sales_summary() instead — it already includes marketplace sales."
+    )
 
 
 async def get_receivables(client: DealPOSClient, outlet: str | None = None,
@@ -354,10 +460,24 @@ async def get_inventory_log(client: DealPOSClient, code: str | None = None,
 # --- stock adjustment ---
 
 async def adjust_stock(client: DealPOSClient, items: list[dict],
-                       notes: str | None = None) -> dict:
+                       notes: str | None = None, reference: str | None = None) -> dict:
     """Delta stock adjustment. Each item: {code, qty, reason?}.
-    Positive qty = add stock; negative = remove stock."""
+    Positive qty = add stock; negative = remove stock.
+
+    The API requires both an Outlet and a Number (a free-form reference the caller
+    assigns, not a lookup against an existing order). ``reference`` lets a caller
+    supply one; otherwise a timestamp-based one is generated so repeated adjustments
+    never collide.
+    """
+    if not client.s.default_outlet:
+        raise DealPOSError(
+            "Adjustment requires an outlet and DEALPOS_DEFAULT_OUTLET is unset "
+            "in .env — the API rejects the adjustment without one."
+        )
+    from datetime import datetime
     body: dict = {
+        "Outlet": client.s.default_outlet,
+        "Number": reference or f"ADJ-{datetime.now():%Y%m%d-%H%M%S}",
         "Details": [
             {
                 "Code": i["code"],
@@ -390,9 +510,25 @@ async def get_inbound_logistics(client: DealPOSClient, date_from: str | None = N
 async def create_inbound_logistic(client: DealPOSClient, items: list[dict],
                                   supplier_code: str | None = None,
                                   notes: str | None = None) -> dict:
-    """Receive PO stock delivery. Each item: {code, qty, unit_cost?}.
-    Prefer over adjust_stock when receiving new stock from a supplier."""
+    """Mark an EXISTING DealPOS purchase order as received. Each item: {code, qty, unit_cost?}.
+
+    Verified live 2026-08-11: this endpoint requires a Number matching a PO already
+    on file in DealPOS ("There is no order with Number ..." otherwise) — it does not
+    create a new receipt out of thin air. There is no ``number`` parameter here because
+    there is nothing a caller could supply that would resolve; if you have a real PO
+    number, add one and pass it through.
+
+    For an invoice with no prior PO record in DealPOS (the common case for ad-hoc
+    supplier stock-ins), use ``adjust_stock`` instead — it books the received quantity
+    directly as a delta.
+    """
+    if not client.s.default_outlet:
+        raise DealPOSError(
+            "InboundLogistic requires an outlet and DEALPOS_DEFAULT_OUTLET is unset "
+            "in .env — the API rejects the receipt without one."
+        )
     body: dict = {
+        "Outlet": client.s.default_outlet,
         "Details": [
             {
                 "Code": i["code"],

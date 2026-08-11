@@ -113,21 +113,13 @@ async def get_writeoffs(date_from: str, date_to: str,
 
 
 @mcp.tool()
-async def list_invoices(date_from: str | None = None, date_to: str | None = None,
+async def list_invoices(date_from: str, date_to: str,
                         customer_code: str | None = None,
                         outlet: str | None = None) -> dict:
-    """List invoices/transactions with optional date, customer, or outlet filter."""
+    """List invoices/transactions in a date range. Both dates are REQUIRED
+    (the DealPOS endpoint 500s without them)."""
     return await tools.list_invoices(_client, date_from=date_from, date_to=date_to,
                                      customer_code=customer_code, outlet=outlet)
-
-
-@mcp.tool()
-async def list_sales_orders(date_from: str | None = None, date_to: str | None = None,
-                            status: str | None = None,
-                            outlet: str | None = None) -> list[dict]:
-    """List sales orders (online/marketplace). Filter by date, status, or outlet."""
-    return await tools.list_sales_orders(_client, date_from=date_from, date_to=date_to,
-                                          status=status, outlet=outlet)
 
 
 @mcp.tool()
