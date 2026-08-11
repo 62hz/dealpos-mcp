@@ -461,10 +461,18 @@ async def get_inventory_log(client: DealPOSClient, code: str | None = None,
 
 async def adjust_stock(client: DealPOSClient, items: list[dict],
                        notes: str | None = None, reference: str | None = None) -> dict:
-    """Delta stock adjustment. Each item: {code, qty, reason?}.
+    """Delta stock adjustment ("Create Adjustment by Adjusting Differences" —
+    POST /api/v3/Adjustment). Each item: {code, qty, reason?}.
     Positive qty = add stock; negative = remove stock.
 
-    The API requires both an Outlet and a Number (a free-form reference the caller
+    Verified live against https://developer.dealpos.com/openapi/openapi/inventory-adjustment/createadjustmentbyadjustingdifferences.md
+    on 2026-08-11. The earlier version of this function sent "Details" and "Notes" —
+    both wrong field names, silently accepted by the endpoint but ignored, which is
+    why every call failed with "No item to be delivered" regardless of quantity. The
+    real per-line array key is "Variants", the real note field is "Note" (singular),
+    and "Date" is a required top-level field this function never sent at all.
+
+    The API also requires Outlet and Number (a free-form reference the caller
     assigns, not a lookup against an existing order). ``reference`` lets a caller
     supply one; otherwise a timestamp-based one is generated so repeated adjustments
     never collide.
@@ -474,21 +482,22 @@ async def adjust_stock(client: DealPOSClient, items: list[dict],
             "Adjustment requires an outlet and DEALPOS_DEFAULT_OUTLET is unset "
             "in .env — the API rejects the adjustment without one."
         )
-    from datetime import datetime
+    from datetime import date, datetime
     body: dict = {
         "Outlet": client.s.default_outlet,
+        "Date": date.today().strftime("%Y/%m/%d"),
         "Number": reference or f"ADJ-{datetime.now():%Y%m%d-%H%M%S}",
-        "Details": [
+        "Variants": [
             {
                 "Code": i["code"],
                 "Quantity": i["qty"],
-                "Notes": i.get("reason", notes or ""),
+                "Note": i.get("reason", notes or ""),
             }
             for i in items
         ]
     }
     if notes:
-        body["Notes"] = notes
+        body["Note"] = notes
     return await client.request("POST", "/api/v3/Adjustment", json=body)
 
 

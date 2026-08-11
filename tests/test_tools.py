@@ -477,10 +477,11 @@ async def test_adjust_stock_payload(client):
     items = [{"code": "VNL-001", "qty": 5, "reason": "Restock"}]
     await tools.adjust_stock(client, items, notes="Weekly restock")
     body = _json.loads(route.calls[0].request.content)
-    assert body["Details"][0]["Code"] == "VNL-001"
-    assert body["Details"][0]["Quantity"] == 5
-    assert body["Details"][0]["Notes"] == "Restock"
-    assert body["Notes"] == "Weekly restock"
+    assert body["Variants"][0]["Code"] == "VNL-001"
+    assert body["Variants"][0]["Quantity"] == 5
+    assert body["Variants"][0]["Note"] == "Restock"
+    assert body["Note"] == "Weekly restock"
+    assert "Date" in body
 
 
 @respx.mock
@@ -490,7 +491,7 @@ async def test_adjust_stock_negative_qty(client):
         return_value=httpx.Response(200, json={"ID": "adj-2"}))
     await tools.adjust_stock(client, [{"code": "CD-001", "qty": -3, "reason": "Damaged"}])
     body = _json.loads(route.calls[0].request.content)
-    assert body["Details"][0]["Quantity"] == -3
+    assert body["Variants"][0]["Quantity"] == -3
 
 
 @respx.mock
@@ -501,8 +502,8 @@ async def test_adjust_stock_multi_item(client):
     items = [{"code": "A", "qty": 10}, {"code": "B", "qty": -2, "reason": "Fix"}]
     await tools.adjust_stock(client, items, notes="Batch")
     body = _json.loads(route.calls[0].request.content)
-    assert len(body["Details"]) == 2
-    assert body["Details"][1]["Code"] == "B"
+    assert len(body["Variants"]) == 2
+    assert body["Variants"][1]["Code"] == "B"
 
 
 @respx.mock
