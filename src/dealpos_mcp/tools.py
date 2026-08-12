@@ -270,6 +270,68 @@ async def create_composite_variant(client: DealPOSClient, product_code: str,
     })
 
 
+async def _find_pricebook_id(client: DealPOSClient, name: str) -> str | None:
+    """Resolve a pricebook name to its ID, or None. The Name query param is a filter, not
+    an exact match, so the caller's name is compared exactly against the results — a
+    substring hit would otherwise overwrite a different pricebook."""
+    found = await client.request("GET", "/api/v3/Pricebook",
+                                 params={"Name": name, "PageNumber": 1, "PageSize": 50})
+    for p in found or []:
+        if p.get("Name") == name:
+            return p.get("ID")
+    return None
+
+
+async def upsert_pricebook(client: DealPOSClient, name: str, variants: list[dict],
+                           minimum_quantity: int = 0, outlets: list[str] | None = None,
+                           start_date: str | None = None, expiration: str | None = None,
+                           description: str | None = None) -> dict:
+    """Create or update a pricebook (POST/PUT /api/v3/Pricebook), matched by exact name.
+
+    ``variants``: [{code, original_price, price}] — ``price`` is the pricebook price.
+
+    ``minimum_quantity`` defaults to 0 on purpose. DealPOS Omnichannel reads a pricebook as
+    a marketplace channel's price source, and a qty of 0 keeps that pricebook from also
+    firing at the POS counter. It is the only thing separating the online price from the
+    in-store price, so it defaults safe rather than relying on the caller to pass it.
+    Raising it re-arms the pricebook as a real wholesale/qty promotion — intended for that
+    use, but never for a channel pricebook.
+
+    PUT requires ID and POST must not carry one, hence the name lookup first.
+    """
+    if not variants:
+        raise DealPOSError("A pricebook needs at least one variant.")
+    body: dict = {
+        "Name": name,
+        "MinimumQuantity": minimum_quantity,
+        "Variants": [{"Code": v["code"], "OriginalPrice": v["original_price"],
+                      "PricebookPrice": v["price"]} for v in variants],
+    }
+    if outlets:
+        body["ListOutlets"] = outlets
+    if start_date:
+        body["StartDate"] = start_date
+    if expiration:
+        body["Expiration"] = expiration
+    if description:
+        body["Description"] = description
+
+    existing = await _find_pricebook_id(client, name)
+    if existing:
+        body["ID"] = existing
+        return await client.request("PUT", "/api/v3/Pricebook", json=body)
+    return await client.request("POST", "/api/v3/Pricebook", json=body)
+
+
+async def get_pricebook(client: DealPOSClient, name: str) -> dict:
+    """Read a pricebook's full detail by name (list to resolve the ID, then detail-by-ID).
+    Use to verify what a write actually landed."""
+    pid = await _find_pricebook_id(client, name)
+    if not pid:
+        raise DealPOSError(f"No pricebook named {name!r}.")
+    return await client.request("GET", f"/api/v3/Pricebook/ID/{pid}")
+
+
 async def update_product_price(client: DealPOSClient, code: str, new_price: float,
                                variant_code: str | None = None) -> dict:
     """Reprice a product: fetch it, set the variant UnitPrice, PUT it back (update by Code)."""

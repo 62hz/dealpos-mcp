@@ -54,6 +54,28 @@ async def create_product(name: str, code: str, category: str, brand: str,
 
 
 @mcp.tool()
+async def upsert_pricebook(name: str, variants: list[dict], minimum_quantity: int = 0,
+                           outlets: list[str] | None = None, start_date: str | None = None,
+                           expiration: str | None = None,
+                           description: str | None = None) -> dict:
+    """Create or update a pricebook by exact name. variants: [{code, original_price, price}].
+    minimum_quantity defaults to 0, which keeps the pricebook inert at the POS counter —
+    required when the pricebook is a marketplace channel's price source, so the online price
+    cannot leak into in-store sales. Only raise it for a real wholesale/qty promotion.
+    Confirm prices with the user before calling."""
+    return await tools.upsert_pricebook(
+        _client, name=name, variants=variants, minimum_quantity=minimum_quantity,
+        outlets=outlets, start_date=start_date, expiration=expiration,
+        description=description)
+
+
+@mcp.tool()
+async def get_pricebook(name: str) -> dict:
+    """Read a pricebook's full detail by name. Use to verify a pricebook write."""
+    return await tools.get_pricebook(_client, name)
+
+
+@mcp.tool()
 async def create_composite_variant(product_code: str, variant_code: str, model: str,
                                    price: float, components: list[dict],
                                    outlet: str | None = None) -> dict:

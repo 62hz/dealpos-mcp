@@ -537,6 +537,107 @@ async def test_adjust_stock_requires_default_outlet():
         await tools.adjust_stock(c, [{"code": "A", "qty": 1}])
 
 
+# --- pricebook ---
+
+def _pb_client():
+    return DealPOSClient(Settings(subdomain="doubledeer.dealpos.co.id", client_id="cid",
+                                  client_secret="sec", default_outlet="MF Store",
+                                  _env_file=None))
+
+
+VARIANTS = [{"code": "A1", "original_price": 100000, "price": 120000}]
+
+
+@respx.mock
+async def test_upsert_pricebook_creates_when_absent():
+    _token()
+    respx.get(f"{BASE}/api/v3/Pricebook").mock(return_value=httpx.Response(200, json=[]))
+    post = respx.post(f"{BASE}/api/v3/Pricebook").mock(
+        return_value=httpx.Response(200, json={"ID": "pb-1", "Message": "created"}))
+    await tools.upsert_pricebook(_pb_client(), "MF Online", VARIANTS)
+    body = _json.loads(post.calls[0].request.content)
+    assert body["Name"] == "MF Online"
+    assert "ID" not in body          # POST must not carry an ID
+    assert body["Variants"] == [{"Code": "A1", "OriginalPrice": 100000,
+                                 "PricebookPrice": 120000}]
+
+
+@respx.mock
+async def test_upsert_pricebook_updates_when_present():
+    _token()
+    respx.get(f"{BASE}/api/v3/Pricebook").mock(return_value=httpx.Response(
+        200, json=[{"ID": "pb-9", "Name": "MF Online"}]))
+    put = respx.put(f"{BASE}/api/v3/Pricebook").mock(
+        return_value=httpx.Response(200, json={"ID": "pb-9"}))
+    await tools.upsert_pricebook(_pb_client(), "MF Online", VARIANTS)
+    body = _json.loads(put.calls[0].request.content)
+    assert body["ID"] == "pb-9"      # PUT requires the ID
+
+
+@respx.mock
+async def test_upsert_pricebook_name_match_is_exact():
+    """A substring hit must not be mistaken for the pricebook — that would overwrite
+    someone else's pricebook with this one's prices."""
+    _token()
+    respx.get(f"{BASE}/api/v3/Pricebook").mock(return_value=httpx.Response(
+        200, json=[{"ID": "pb-other", "Name": "MF Online Archive"}]))
+    post = respx.post(f"{BASE}/api/v3/Pricebook").mock(
+        return_value=httpx.Response(200, json={"ID": "pb-new"}))
+    await tools.upsert_pricebook(_pb_client(), "MF Online", VARIANTS)
+    assert post.called
+
+
+@respx.mock
+async def test_upsert_pricebook_defaults_minimum_quantity_to_zero():
+    """qty 0 keeps the pricebook inert at the POS counter. It is the only thing stopping
+    an online price reaching in-store sales, so it must not depend on the caller."""
+    _token()
+    respx.get(f"{BASE}/api/v3/Pricebook").mock(return_value=httpx.Response(200, json=[]))
+    post = respx.post(f"{BASE}/api/v3/Pricebook").mock(
+        return_value=httpx.Response(200, json={"ID": "pb-1"}))
+    await tools.upsert_pricebook(_pb_client(), "MF Online", VARIANTS)
+    body = _json.loads(post.calls[0].request.content)
+    assert body["MinimumQuantity"] == 0
+
+
+@respx.mock
+async def test_upsert_pricebook_optional_fields_omitted_when_unset():
+    _token()
+    respx.get(f"{BASE}/api/v3/Pricebook").mock(return_value=httpx.Response(200, json=[]))
+    post = respx.post(f"{BASE}/api/v3/Pricebook").mock(
+        return_value=httpx.Response(200, json={"ID": "pb-1"}))
+    await tools.upsert_pricebook(_pb_client(), "MF Online", VARIANTS)
+    body = _json.loads(post.calls[0].request.content)
+    for k in ("ListOutlets", "StartDate", "Expiration", "Description"):
+        assert k not in body
+
+
+async def test_upsert_pricebook_requires_variants():
+    with pytest.raises(DealPOSError):
+        await tools.upsert_pricebook(_pb_client(), "MF Online", [])
+
+
+@respx.mock
+async def test_get_pricebook_reads_detail_by_id():
+    _token()
+    respx.get(f"{BASE}/api/v3/Pricebook").mock(return_value=httpx.Response(
+        200, json=[{"ID": "pb-9", "Name": "MF Online"}]))
+    respx.get(f"{BASE}/api/v3/Pricebook/ID/pb-9").mock(return_value=httpx.Response(
+        200, json={"ID": "pb-9", "Name": "MF Online", "MinimumQuantity": 0,
+                   "Variants": [{"Code": "A1", "OriginalPrice": 100000,
+                                 "PricebookPrice": 120000}]}))
+    out = await tools.get_pricebook(_pb_client(), "MF Online")
+    assert out["Variants"][0]["PricebookPrice"] == 120000
+
+
+@respx.mock
+async def test_get_pricebook_missing_raises():
+    _token()
+    respx.get(f"{BASE}/api/v3/Pricebook").mock(return_value=httpx.Response(200, json=[]))
+    with pytest.raises(DealPOSError):
+        await tools.get_pricebook(_pb_client(), "Nope")
+
+
 # --- create_composite_variant ---
 
 @respx.mock
