@@ -229,6 +229,47 @@ async def create_product(client: DealPOSClient, name: str, code: str, category: 
     return await client.request("POST", "/api/v3/Product", json=body)
 
 
+async def create_composite_variant(client: DealPOSClient, product_code: str,
+                                   variant_code: str, model: str, price: float,
+                                   components: list[dict],
+                                   outlet: str | None = None) -> dict:
+    """Add a Composite variant to an existing product — a bundle that holds no stock of
+    its own and draws down its components instead (e.g. a stereo pair built from 2x the
+    single speaker, so both listings share one inventory pool).
+
+    ``components``: [{code, qty}] — variant codes of the parts, and how many of each.
+
+    Two calls, because no single endpoint does it. POST /api/v3/Variant/Add creates the
+    variant but its schema has no Type or Components field at all; only
+    PUT /api/v3/Variant carries them. Verified against the OpenAPI bundle at
+    https://developer.dealpos.com/_bundle/openapi/openapi.yaml on 2026-08-12 — note the
+    rendered per-endpoint .md docs OMIT the request body for both PUT /api/v3/Variant and
+    POST /api/v3/Product, so composite support looks absent there. It is not.
+
+    The PUT's Standard/Composite branch requires Code, Components, and OutletPrice, so an
+    outlet is mandatory; it falls back to DEALPOS_DEFAULT_OUTLET.
+    """
+    if not components:
+        raise DealPOSError("A composite variant needs at least one component.")
+    outlet = outlet or client.s.default_outlet
+    if not outlet:
+        raise DealPOSError(
+            "Composite variants require an outlet (the API's OutletPrice field is "
+            "required) and DEALPOS_DEFAULT_OUTLET is unset in .env."
+        )
+    await client.request("POST", "/api/v3/Variant/Add", json={
+        "Code": product_code,
+        "Variants": [{"Model": model, "Code": variant_code,
+                      "UnitPrice": price, "Discontinued": False}],
+    })
+    return await client.request("PUT", "/api/v3/Variant", json={
+        "Code": variant_code,
+        "Type": "Composite",
+        "Components": [{"Code": c["code"], "Qty": c["qty"]} for c in components],
+        "OutletPrice": [{"Outlet": outlet, "Price": price}],
+    })
+
+
 async def update_product_price(client: DealPOSClient, code: str, new_price: float,
                                variant_code: str | None = None) -> dict:
     """Reprice a product: fetch it, set the variant UnitPrice, PUT it back (update by Code)."""

@@ -537,6 +537,72 @@ async def test_adjust_stock_requires_default_outlet():
         await tools.adjust_stock(c, [{"code": "A", "qty": 1}])
 
 
+# --- create_composite_variant ---
+
+@respx.mock
+async def test_create_composite_variant_two_call_payloads():
+    _token()
+    c = DealPOSClient(Settings(subdomain="doubledeer.dealpos.co.id", client_id="cid",
+                               client_secret="sec", default_outlet="MF Store", _env_file=None))
+    add = respx.post(f"{BASE}/api/v3/Variant/Add").mock(
+        return_value=httpx.Response(200, json={"ID": "p-1"}))
+    put = respx.put(f"{BASE}/api/v3/Variant").mock(
+        return_value=httpx.Response(200, json={"Message": "Variant has been updated"}))
+
+    await tools.create_composite_variant(
+        c, product_code="SPK-SYI-N200", variant_code="SPK-SYI-N200PR-CW",
+        model="Stereo Pair - Cream White", price=2079000,
+        components=[{"code": "SYIN200-CW", "qty": 2}])
+
+    # Call 1 creates the variant on the parent product.
+    a = _json.loads(add.calls[0].request.content)
+    assert a["Code"] == "SPK-SYI-N200"
+    assert a["Variants"] == [{"Model": "Stereo Pair - Cream White",
+                              "Code": "SPK-SYI-N200PR-CW",
+                              "UnitPrice": 2079000,
+                              "Discontinued": False}]
+
+    # Call 2 converts it to Composite. Type/Components/OutletPrice only exist here —
+    # Variant/Add has no Type or Components field at all.
+    b = _json.loads(put.calls[0].request.content)
+    assert b["Code"] == "SPK-SYI-N200PR-CW"
+    assert b["Type"] == "Composite"
+    assert b["Components"] == [{"Code": "SYIN200-CW", "Qty": 2}]
+    assert b["OutletPrice"] == [{"Outlet": "MF Store", "Price": 2079000}]
+
+
+@respx.mock
+async def test_create_composite_variant_outlet_override():
+    _token()
+    c = DealPOSClient(Settings(subdomain="doubledeer.dealpos.co.id", client_id="cid",
+                               client_secret="sec", default_outlet="MF Store", _env_file=None))
+    respx.post(f"{BASE}/api/v3/Variant/Add").mock(
+        return_value=httpx.Response(200, json={"ID": "p-1"}))
+    put = respx.put(f"{BASE}/api/v3/Variant").mock(
+        return_value=httpx.Response(200, json={"Message": "ok"}))
+    await tools.create_composite_variant(
+        c, product_code="P", variant_code="V", model="M", price=100,
+        components=[{"code": "X", "qty": 2}], outlet="Other Outlet")
+    b = _json.loads(put.calls[0].request.content)
+    assert b["OutletPrice"] == [{"Outlet": "Other Outlet", "Price": 100}]
+
+
+async def test_create_composite_variant_requires_outlet():
+    c = DealPOSClient(Settings(subdomain="x", client_id="a", client_secret="b", _env_file=None))
+    with pytest.raises(DealPOSError):
+        await tools.create_composite_variant(
+            c, product_code="P", variant_code="V", model="M", price=100,
+            components=[{"code": "X", "qty": 2}])
+
+
+async def test_create_composite_variant_requires_components():
+    c = DealPOSClient(Settings(subdomain="x", client_id="a", client_secret="b",
+                               default_outlet="MF Store", _env_file=None))
+    with pytest.raises(DealPOSError):
+        await tools.create_composite_variant(
+            c, product_code="P", variant_code="V", model="M", price=100, components=[])
+
+
 # --- get_inbound_logistics ---
 
 @respx.mock

@@ -54,6 +54,18 @@ async def create_product(name: str, code: str, category: str, brand: str,
 
 
 @mcp.tool()
+async def create_composite_variant(product_code: str, variant_code: str, model: str,
+                                   price: float, components: list[dict],
+                                   outlet: str | None = None) -> dict:
+    """Add a Composite (bundle) variant to an existing product. It holds no stock of its
+    own — selling it draws down its components, so bundle and parts share one pool.
+    components: [{code, qty}]. Confirm components and price with the user before calling."""
+    return await tools.create_composite_variant(
+        _client, product_code=product_code, variant_code=variant_code, model=model,
+        price=price, components=components, outlet=outlet)
+
+
+@mcp.tool()
 async def update_product_price(code: str, new_price: float, variant_code: str | None = None) -> dict:
     """Change a product's price. Confirm the product and new price with the user first."""
     return await tools.update_product_price(_client, code, new_price, variant_code)
