@@ -97,6 +97,17 @@ async def create_composite_variant(product_code: str, variant_code: str, model: 
 
 
 @mcp.tool()
+async def set_variant_composite(variant_code: str, price: float, components: list[dict],
+                                outlet: str | None = None) -> dict:
+    """Retry converting a variant to Composite when create_composite_variant's conversion
+    didn't stick (Components applied but Type stayed Standard). PUT-only, no Variant/Add —
+    safe to call on a variant that already exists. components: [{code, qty}].
+    Confirm with the user before calling."""
+    return await tools.set_variant_composite(
+        _client, variant_code=variant_code, price=price, components=components, outlet=outlet)
+
+
+@mcp.tool()
 async def update_product_price(code: str, new_price: float, variant_code: str | None = None) -> dict:
     """Change a product's price. Confirm the product and new price with the user first."""
     return await tools.update_product_price(_client, code, new_price, variant_code)

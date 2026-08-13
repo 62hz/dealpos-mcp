@@ -791,6 +791,43 @@ async def test_create_composite_variant_requires_components():
             c, product_code="P", variant_code="V", model="M", price=100, components=[])
 
 
+# --- set_variant_composite ---
+
+@respx.mock
+async def test_set_variant_composite_put_only():
+    """Exists for the case create_composite_variant's PUT half didn't stick (observed live:
+    DealPOS applied Components but left Type as Standard on a variant of a just-created
+    product) — retry the conversion without re-running Variant/Add, which would 400 on the
+    now-existing code."""
+    _token()
+    c = DealPOSClient(Settings(subdomain="doubledeer.dealpos.co.id", client_id="cid",
+                               client_secret="sec", default_outlet="MF Store", _env_file=None))
+    put = respx.put(f"{BASE}/api/v3/Variant").mock(
+        return_value=httpx.Response(200, json={"Message": "Variant has been updated"}))
+    await tools.set_variant_composite(
+        c, variant_code="SYIN200PAIR-CW", price=2079000,
+        components=[{"code": "SYIN200-CW", "qty": 2}])
+    b = _json.loads(put.calls[0].request.content)
+    assert b["Code"] == "SYIN200PAIR-CW"
+    assert b["Type"] == "Composite"
+    assert b["Components"] == [{"Code": "SYIN200-CW", "Qty": 2}]
+    assert b["OutletPrice"] == [{"Outlet": "MF Store", "Price": 2079000}]
+
+
+async def test_set_variant_composite_requires_outlet():
+    c = DealPOSClient(Settings(subdomain="x", client_id="a", client_secret="b", _env_file=None))
+    with pytest.raises(DealPOSError):
+        await tools.set_variant_composite(
+            c, variant_code="V", price=100, components=[{"code": "X", "qty": 2}])
+
+
+async def test_set_variant_composite_requires_components():
+    c = DealPOSClient(Settings(subdomain="x", client_id="a", client_secret="b",
+                               default_outlet="MF Store", _env_file=None))
+    with pytest.raises(DealPOSError):
+        await tools.set_variant_composite(c, variant_code="V", price=100, components=[])
+
+
 # --- get_inbound_logistics ---
 
 @respx.mock

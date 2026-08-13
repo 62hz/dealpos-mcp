@@ -251,8 +251,7 @@ async def create_composite_variant(client: DealPOSClient, product_code: str,
     """
     if not components:
         raise DealPOSError("A composite variant needs at least one component.")
-    outlet = outlet or client.s.default_outlet
-    if not outlet:
+    if not (outlet or client.s.default_outlet):
         raise DealPOSError(
             "Composite variants require an outlet (the API's OutletPrice field is "
             "required) and DEALPOS_DEFAULT_OUTLET is unset in .env."
@@ -262,6 +261,28 @@ async def create_composite_variant(client: DealPOSClient, product_code: str,
         "Variants": [{"Model": model, "Code": variant_code,
                       "UnitPrice": price, "Discontinued": False}],
     })
+    return await set_variant_composite(client, variant_code=variant_code, price=price,
+                                       components=components, outlet=outlet)
+
+
+async def set_variant_composite(client: DealPOSClient, variant_code: str, price: float,
+                                components: list[dict], outlet: str | None = None) -> dict:
+    """PUT-only half of composite conversion — the same call create_composite_variant makes
+    after adding the variant, exposed standalone so a conversion that didn't stick can be
+    retried without re-running Variant/Add (which 400s on the now-existing code).
+
+    Observed live 2026-08-13: converting a variant on a just-created product applied
+    Components but left Type as Standard — a partial application on DealPOS's side. This
+    function is the fix path for that: re-PUT until Type reads back as Composite.
+    """
+    if not components:
+        raise DealPOSError("A composite variant needs at least one component.")
+    outlet = outlet or client.s.default_outlet
+    if not outlet:
+        raise DealPOSError(
+            "Composite variants require an outlet (the API's OutletPrice field is "
+            "required) and DEALPOS_DEFAULT_OUTLET is unset in .env."
+        )
     return await client.request("PUT", "/api/v3/Variant", json={
         "Code": variant_code,
         "Type": "Composite",
