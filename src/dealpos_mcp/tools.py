@@ -270,6 +270,55 @@ async def create_composite_variant(client: DealPOSClient, product_code: str,
     })
 
 
+async def set_variant_weights(client: DealPOSClient, items: list[dict]) -> list[dict]:
+    """Set shipping weight (grams) on variants. items: [{code, grams}].
+
+    Weight is a required field for uploading a product to a marketplace channel via DealPOS
+    Omnichannel, alongside SKU, image and description. MF's catalogue has it at 0
+    everywhere, which is why marketplace uploads fail while inventory sync still works.
+
+    Read-modify-write, not a bare PUT. The Standard/Composite branch of PUT /api/v3/Variant
+    requires Code, Components and OutletPrice, so sending only {Code, Weight} against a
+    Composite variant would strip its components — the bundle would keep selling while no
+    longer drawing down its parts. Each variant is fetched, the weight replaced, and the
+    rest written back unchanged.
+    """
+    if not items:
+        raise DealPOSError("No variants given.")
+    for i in items:
+        if not isinstance(i.get("grams"), (int, float)) or i["grams"] <= 0:
+            raise DealPOSError(
+                f"Weight for {i.get('code')!r} must be a positive number of grams; "
+                f"got {i.get('grams')!r}. Zero is the broken state this fixes."
+            )
+
+    results = []
+    for i in items:
+        code = i["code"]
+        v = await client.request("GET", "/api/v3/Variant/Detail", params={"Code": code})
+        body = {
+            "Code": v["Code"],
+            "Model": v.get("Variant") or v.get("Model") or "",
+            "Type": v.get("Type") or "Standard",
+            "Weight": int(i["grams"]),
+            "UnitCost": v.get("UnitCost") or 0,
+            "UnitPrice": v.get("UnitPrice") or 0,
+            "OrderPrice": v.get("OrderPrice") or 0,
+            "Taxable": v.get("Taxable", True),
+            "LoyaltyPoint": v.get("LoyaltyPoint", True),
+            "Discontinued": v.get("Discontinued", False),
+            "Components": [{"Code": c["Code"], "Qty": c["Qty"]}
+                           for c in (v.get("Components") or [])],
+            "OutletPrice": [{"Outlet": o["Outlet"], "Price": o["Price"],
+                             "ExtraCost": o.get("ExtraCost", 0)}
+                            for o in (v.get("OutletPrice") or [])],
+        }
+        if v.get("Description"):
+            body["VariantDescription"] = v["Description"]
+        results.append(await client.request("PUT", "/api/v3/Variant", json=body))
+    return results
+
+
 async def _find_pricebook_id(client: DealPOSClient, name: str) -> str | None:
     """Resolve a pricebook name to its ID, or None. The Name query param is a filter, not
     an exact match, so the caller's name is compared exactly against the results — a

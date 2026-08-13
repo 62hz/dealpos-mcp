@@ -54,6 +54,15 @@ async def create_product(name: str, code: str, category: str, brand: str,
 
 
 @mcp.tool()
+async def set_variant_weights(items: list[dict]) -> list[dict]:
+    """Set shipping weight in grams on variants. items: [{code, grams}].
+    Weight is required before a product can be uploaded to a marketplace channel via
+    Omnichannel. Preserves composite components and outlet prices via read-modify-write.
+    Confirm the weights with the user before calling."""
+    return await tools.set_variant_weights(_client, items)
+
+
+@mcp.tool()
 async def upsert_pricebook(name: str, variants: list[dict], minimum_quantity: int = 0,
                            outlets: list[str] | None = None, start_date: str | None = None,
                            expiration: str | None = None,

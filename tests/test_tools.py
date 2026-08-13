@@ -537,6 +537,93 @@ async def test_adjust_stock_requires_default_outlet():
         await tools.adjust_stock(c, [{"code": "A", "qty": 1}])
 
 
+# --- set_variant_weights ---
+
+def _w_client():
+    return DealPOSClient(Settings(subdomain="doubledeer.dealpos.co.id", client_id="cid",
+                                  client_secret="sec", default_outlet="MF Store",
+                                  _env_file=None))
+
+
+COMPOSITE_DETAIL = {
+    "Code": "PR-CW", "Variant": "Stereo Pair", "Type": "Composite", "Weight": 0,
+    "UnitCost": 1307482, "UnitPrice": 2079000, "Taxable": True, "LoyaltyPoint": True,
+    "Discontinued": False, "ImageURL": "", "Description": "",
+    "Components": [{"Code": "SYIN200-CW", "Name": "N200 CW", "Qty": 2}],
+    "OutletPrice": [{"Outlet": "MF Store", "Price": 2079000, "ExtraCost": 0}],
+}
+
+
+@respx.mock
+async def test_set_variant_weights_preserves_composite_components():
+    """The PUT's composite branch requires Components and OutletPrice. Sending only
+    {Code, Weight} would strip the bundle back to an empty shell — the variant would keep
+    selling while no longer drawing down its parts."""
+    _token()
+    respx.get(f"{BASE}/api/v3/Variant/Detail").mock(
+        return_value=httpx.Response(200, json=COMPOSITE_DETAIL))
+    put = respx.put(f"{BASE}/api/v3/Variant").mock(
+        return_value=httpx.Response(200, json={"Message": "Variant has been updated"}))
+    await tools.set_variant_weights(_w_client(), [{"code": "PR-CW", "grams": 1720}])
+    body = _json.loads(put.calls[0].request.content)
+    assert body["Weight"] == 1720
+    assert body["Type"] == "Composite"
+    assert body["Components"] == [{"Code": "SYIN200-CW", "Qty": 2}]
+    assert body["OutletPrice"] == [{"Outlet": "MF Store", "Price": 2079000, "ExtraCost": 0}]
+
+
+@respx.mock
+async def test_set_variant_weights_preserves_prices():
+    _token()
+    respx.get(f"{BASE}/api/v3/Variant/Detail").mock(
+        return_value=httpx.Response(200, json=COMPOSITE_DETAIL))
+    put = respx.put(f"{BASE}/api/v3/Variant").mock(
+        return_value=httpx.Response(200, json={"Message": "ok"}))
+    await tools.set_variant_weights(_w_client(), [{"code": "PR-CW", "grams": 1720}])
+    body = _json.loads(put.calls[0].request.content)
+    assert body["UnitPrice"] == 2079000
+    assert body["UnitCost"] == 1307482
+    assert body["Discontinued"] is False
+
+
+@respx.mock
+async def test_set_variant_weights_standard_variant_sends_empty_components():
+    _token()
+    respx.get(f"{BASE}/api/v3/Variant/Detail").mock(return_value=httpx.Response(200, json={
+        "Code": "STD-1", "Variant": "White", "Type": "Standard", "Weight": 0,
+        "UnitCost": 100, "UnitPrice": 200, "Taxable": True, "LoyaltyPoint": True,
+        "Discontinued": False, "Components": [], "OutletPrice": []}))
+    put = respx.put(f"{BASE}/api/v3/Variant").mock(
+        return_value=httpx.Response(200, json={"Message": "ok"}))
+    await tools.set_variant_weights(_w_client(), [{"code": "STD-1", "grams": 860}])
+    body = _json.loads(put.calls[0].request.content)
+    assert body["Weight"] == 860 and body["Components"] == [] and body["Type"] == "Standard"
+
+
+@respx.mock
+async def test_set_variant_weights_handles_multiple_items():
+    _token()
+    respx.get(f"{BASE}/api/v3/Variant/Detail").mock(
+        return_value=httpx.Response(200, json=COMPOSITE_DETAIL))
+    put = respx.put(f"{BASE}/api/v3/Variant").mock(
+        return_value=httpx.Response(200, json={"Message": "ok"}))
+    out = await tools.set_variant_weights(
+        _w_client(), [{"code": "A", "grams": 860}, {"code": "B", "grams": 1230}])
+    assert len(put.calls) == 2 and len(out) == 2
+
+
+async def test_set_variant_weights_rejects_non_positive():
+    """0 is the broken state this tool exists to fix, so accepting it is always a mistake."""
+    for grams in (0, -5):
+        with pytest.raises(DealPOSError):
+            await tools.set_variant_weights(_w_client(), [{"code": "A", "grams": grams}])
+
+
+async def test_set_variant_weights_requires_items():
+    with pytest.raises(DealPOSError):
+        await tools.set_variant_weights(_w_client(), [])
+
+
 # --- pricebook ---
 
 def _pb_client():
