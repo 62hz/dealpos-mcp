@@ -95,6 +95,26 @@ async def test_get_product_by_code(client):
     assert out["Name"] == "Vinyl A"
 
 
+# --- get_variant_detail ---
+#
+# get_product's Variants[] is compact and does not carry Type or Components -- the exact
+# fields that silently failed to apply on 2026-08-13 (a composite conversion left
+# Type=Standard while Components stuck). That bug was only caught by shelling out to a
+# raw script three times that day. This is the tool that should have existed already.
+
+@respx.mock
+async def test_get_variant_detail_by_code():
+    _token()
+    c = DealPOSClient(Settings(subdomain="doubledeer.dealpos.co.id", client_id="cid",
+                               client_secret="sec", _env_file=None))
+    respx.get(f"{BASE}/api/v3/Variant/Detail").mock(return_value=httpx.Response(200, json={
+        "Code": "SYIN200PAIR-CW", "Type": "Composite", "Weight": 0,
+        "Components": [{"Code": "SYIN200-CW", "Qty": 2}], "OutletPrice": []}))
+    out = await tools.get_variant_detail(c, code="SYIN200PAIR-CW")
+    assert out["Type"] == "Composite"
+    assert out["Components"] == [{"Code": "SYIN200-CW", "Qty": 2}]
+
+
 # --- create product (plan Task 8) ---
 
 @respx.mock

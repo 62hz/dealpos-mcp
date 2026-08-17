@@ -207,6 +207,18 @@ async def get_product(client: DealPOSClient, code: str) -> dict:
     return await client.request("GET", "/api/v3/Product/Code", params={"Code": code})
 
 
+async def get_variant_detail(client: DealPOSClient, code: str) -> dict:
+    """Get a single variant by its Code, including Type, Components and Weight.
+
+    get_product's Variants[] is compact and omits these fields entirely, so a composite
+    conversion or weight write can't be verified through it. Use this to confirm a write
+    actually landed rather than trusting the tool's own response message -- on 2026-08-13
+    a composite-conversion call returned "Update Success" while Type silently stayed
+    Standard; only a direct read caught it.
+    """
+    return await client.request("GET", "/api/v3/Variant/Detail", params={"Code": code})
+
+
 # --- products write ---
 
 async def create_product(client: DealPOSClient, name: str, code: str, category: str,

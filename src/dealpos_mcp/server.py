@@ -45,6 +45,14 @@ async def get_product(code: str) -> dict:
 
 
 @mcp.tool()
+async def get_variant_detail(code: str) -> dict:
+    """Get one variant by its Code, including Type/Components/Weight -- fields
+    get_product's compact Variants[] omits. Use to verify a composite conversion or
+    weight write actually landed, rather than trusting the write tool's own response."""
+    return await tools.get_variant_detail(_client, code)
+
+
+@mcp.tool()
 async def create_product(name: str, code: str, category: str, brand: str,
                          unit_price: float, unit_cost: float = 0, image_url: str = "") -> dict:
     """Create a single-variant product. Confirm details with the user before calling."""
