@@ -63,7 +63,8 @@ async def create_product(name: str, code: str, category: str, brand: str,
 
 @mcp.tool()
 async def set_variant_weights(items: list[dict]) -> list[dict]:
-    """Set shipping weight in grams on variants. items: [{code, grams}].
+    """Set shipping weight in grams on variants. items: [{code, grams}] — MUST be a
+    JSON array of objects, never a comma-separated string.
     Weight is required before a product can be uploaded to a marketplace channel via
     Omnichannel. Preserves composite components and outlet prices via read-modify-write.
     Confirm the weights with the user before calling."""
@@ -75,7 +76,9 @@ async def upsert_pricebook(name: str, variants: list[dict], minimum_quantity: in
                            outlets: list[str] | None = None, start_date: str | None = None,
                            expiration: str | None = None,
                            description: str | None = None) -> dict:
-    """Create or update a pricebook by exact name. variants: [{code, original_price, price}].
+    """Create or update a pricebook by exact name. variants: [{code, original_price, price}]
+    — MUST be a JSON array of objects, never a comma-separated string. outlets, if given,
+    is also a JSON array of outlet names, e.g. ["MF Store"], not a comma-separated string.
     minimum_quantity defaults to 0, which keeps the pricebook inert at the POS counter —
     required when the pricebook is a marketplace channel's price source, so the online price
     cannot leak into in-store sales. Only raise it for a real wholesale/qty promotion.
@@ -98,7 +101,8 @@ async def create_composite_variant(product_code: str, variant_code: str, model: 
                                    outlet: str | None = None) -> dict:
     """Add a Composite (bundle) variant to an existing product. It holds no stock of its
     own — selling it draws down its components, so bundle and parts share one pool.
-    components: [{code, qty}]. Confirm components and price with the user before calling."""
+    components: [{code, qty}] — MUST be a JSON array of objects, never a comma-separated
+    string. Confirm components and price with the user before calling."""
     return await tools.create_composite_variant(
         _client, product_code=product_code, variant_code=variant_code, model=model,
         price=price, components=components, outlet=outlet)
@@ -109,7 +113,8 @@ async def set_variant_composite(variant_code: str, price: float, components: lis
                                 outlet: str | None = None) -> dict:
     """Retry converting a variant to Composite when create_composite_variant's conversion
     didn't stick (Components applied but Type stayed Standard). PUT-only, no Variant/Add —
-    safe to call on a variant that already exists. components: [{code, qty}].
+    safe to call on a variant that already exists. components: [{code, qty}] — MUST be a
+    JSON array of objects, never a comma-separated string.
     Confirm with the user before calling."""
     return await tools.set_variant_composite(
         _client, variant_code=variant_code, price=price, components=components, outlet=outlet)
@@ -194,7 +199,8 @@ async def update_product(code: str, fields: dict) -> dict:
 @mcp.tool()
 async def get_inventory_by_codes(codes: list[str],
                                   outlet: str | None = None) -> list[dict]:
-    """Batch stock lookup for multiple product codes — single API call."""
+    """Batch stock lookup for multiple product codes — single API call.
+    codes MUST be a JSON array, e.g. ["ABC123", "XYZ789"], never a comma-separated string."""
     return await tools.get_inventory_by_codes(_client, codes, outlet=outlet)
 
 
@@ -208,7 +214,8 @@ async def get_inventory_log(code: str | None = None, date_from: str | None = Non
 
 @mcp.tool()
 async def adjust_stock(items: list[dict], notes: str | None = None) -> dict:
-    """Create stock adjustment. items: [{code, qty, reason?}].
+    """Create stock adjustment. items: [{code, qty, reason?}] — MUST be a JSON array
+    of objects, never a comma-separated string.
     Positive qty = add, negative = remove.
     Confirm quantities with the user before calling."""
     return await tools.adjust_stock(_client, items, notes=notes)
@@ -225,7 +232,8 @@ async def get_inbound_logistics(date_from: str | None = None,
 @mcp.tool()
 async def create_inbound_logistic(items: list[dict], supplier_code: str | None = None,
                                    notes: str | None = None) -> dict:
-    """Receive PO stock delivery. items: [{code, qty, unit_cost?}].
+    """Receive PO stock delivery. items: [{code, qty, unit_cost?}] — MUST be a JSON array
+    of objects, never a comma-separated string.
     Confirm with user before calling."""
     return await tools.create_inbound_logistic(_client, items,
                                                supplier_code=supplier_code, notes=notes)
