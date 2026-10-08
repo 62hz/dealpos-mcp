@@ -10,6 +10,12 @@ class DealPOSError(Exception):
     """Friendly, user-facing DealPOS API error."""
 
 
+# DealPOS uses POST for a few pure reads. Any other non-GET is a write and is
+# blocked while Settings.read_only is on. A new read-via-POST endpoint must be added
+# here, otherwise it fails closed with the read-only error below.
+_READ_ONLY_POSTS = {"/api/v3/Report/DailySales", "/api/v3/Inventory/CodeArray"}
+
+
 class DealPOSClient:
     def __init__(self, settings: Settings):
         self.s = settings
@@ -31,6 +37,10 @@ class DealPOSClient:
 
     async def request(self, method: str, path: str, *, params: dict | None = None,
                       json: dict | None = None, _max_retries: int = 3):
+        if self.s.read_only and method.upper() != "GET" and path not in _READ_ONLY_POSTS:
+            raise DealPOSError(
+                f"Read-only mode: {method.upper()} {path} writes to DealPOS and was blocked. "
+                "Set DEALPOS_READ_ONLY=false to enable write tools.")
         for attempt in range(_max_retries + 1):
             token = await self._get_token()
             r = await self._http.request(method, path, params=params, json=json,

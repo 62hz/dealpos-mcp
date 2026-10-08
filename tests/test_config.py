@@ -11,6 +11,14 @@ def test_settings_build_base_url_and_defaults(monkeypatch):
     assert s.low_stock_fallback == 5  # default
 
 
+def test_settings_defaults_are_safe_and_instant(monkeypatch):
+    monkeypatch.delenv("DEALPOS_READ_ONLY", raising=False)
+    monkeypatch.delenv("DEALPOS_SUBDOMAIN", raising=False)
+    s = Settings(client_id="cid", client_secret="secret", _env_file=None)
+    assert s.read_only is True                        # writes opt-in
+    assert s.subdomain == "doubledeer.dealpos.co.id"  # only the two secrets are required
+
+
 def test_settings_missing_credentials_raises(monkeypatch):
     monkeypatch.delenv("DEALPOS_CLIENT_ID", raising=False)
     monkeypatch.setenv("DEALPOS_SUBDOMAIN", "x")

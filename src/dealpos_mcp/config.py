@@ -11,11 +11,13 @@ class Settings(BaseSettings):
         extra="ignore"
     )
 
-    subdomain: str
+    subdomain: str = "doubledeer.dealpos.co.id"
     client_id: str
     client_secret: str
     default_outlet: str | None = None
     low_stock_fallback: int = 5
+    # Safe by default: write tools refuse to run until DEALPOS_READ_ONLY=false.
+    read_only: bool = True
 
     @property
     def base_url(self) -> str:
