@@ -4,8 +4,9 @@ Local [MCP](https://modelcontextprotocol.io) server that lets Claude read (and, 
 allow it, write) DealPOS data for Medium Format. Runs on your machine over stdio; there
 is no hosted service.
 
-**Read-only by default.** All 18 read tools work out of the box. The 10 write tools are
-blocked until you set `DEALPOS_READ_ONLY=false`.
+**Read-only by default.** The 18 read tools work out of the box; 17 are called against live
+DealPOS by `tests/test_contract_live.py` (`get_pricebook` needs a pricebook name, so it is
+the one that is not). The 10 write tools are blocked until you set `DEALPOS_READ_ONLY=false`.
 
 ## Quick start (teammates)
 
@@ -53,8 +54,8 @@ config, never in the repo.
 |------|---------|
 | `get_sales_summary` | Qty, net sales, top item between two dates |
 | `get_daily_sales` | Daily sales for a full year |
-| `list_invoices` | Invoices in a date range (both dates required) |
-| `get_receivables` | Outstanding receivables, optional overdue filter |
+| `list_invoices` | Invoices in a date range (both dates required), paged; rows carry `Amount`, `Payment`, `Delivery`, `Fulfillment`. Sets `truncated` if the page cap stops it |
+| `get_receivables` | Unpaid and partly-paid invoices (last 365 days by default), optional overdue filter. DealPOS has no receivables endpoint, so this is built from invoices; it includes pending TikTok/Shopee settlements and internal `MF DISPLAY/B-STOCK` entries, so group by `Customer` |
 | `get_writeoffs` | Write-offs (e.g. TikTok admin fees) in a date range |
 | `list_products`, `get_product`, `get_variant_detail` | Catalogue, one product, one variant (type/components/weight) |
 | `get_pricebook` | One pricebook by name |
@@ -93,6 +94,10 @@ Keep read-only on unless you actually need to write.
 - List-typed arguments (`codes`, `items`, `variants`, `components`, `outlets`) must be real
   JSON arrays, never comma-separated strings.
 - `list_invoices` needs both `date_from` and `date_to` or DealPOS returns a 500.
+- DealPOS allows 50 requests per 180 seconds with no queue (`GET /api/v3/ratelimit`).
+  Wide reads (long sales ranges, whole-catalogue lists) can use that up; the server then
+  waits out the `Retry-After`, so a call that looks hung is usually waiting for the window
+  to clear. Space heavy runs at least three minutes apart.
 - Environment variables always win over a `.env` file.
 
 ## Development
@@ -107,6 +112,8 @@ uv run pytest -q
 All HTTP in the suite is mocked, so tests need no credentials or network.
 `tests/test_contract_live.py` is the only file that talks to DealPOS (read-only GETs). It is
 skipped by default; run it on its own with `DEALPOS_LIVE_CONTRACT=1 uv run pytest tests/test_contract_live.py -v`.
+The whole file makes more than 50 requests, so it can outlast one rate-limit window; run it
+in parts (`-k every_read_tool` is the quick smoke test) and wait three minutes between runs.
 
 To run from a local checkout instead of GitHub, point your client at
 `uv run --directory /path/to/dealpos-mcp dealpos-mcp`; the server reads `.env` from the
