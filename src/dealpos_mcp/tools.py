@@ -1,3 +1,5 @@
+from datetime import date, datetime, timedelta
+
 from .client import DealPOSClient, DealPOSError
 
 
@@ -24,7 +26,6 @@ async def _product_sold_chunked(client: DealPOSClient, date_from: str, date_to: 
     Returns (rows, truncated). `truncated` is True only if a single day still
     hits the cap, which no split can fix.
     """
-    from datetime import date, timedelta
 
     params: dict = {"From": date_from, "To": date_to}
     if outlet:
@@ -611,32 +612,51 @@ async def list_sales_orders(client: DealPOSClient, date_from: str | None = None,
     )
 
 
+def _due_date(raw) -> "date | None":
+    """Invoice `Due` as a date, or None. DealPOS uses 0001-01-01 for 'no due date'."""
+    try:
+        d = datetime.fromisoformat(str(raw)[:10]).date()
+    except ValueError:
+        return None
+    return d if d.year > 1900 else None
+
+
 async def get_receivables(client: DealPOSClient, outlet: str | None = None,
-                          min_days_overdue: int | None = None) -> dict:
-    """List outstanding receivables, optionally filtered by days overdue."""
-    from datetime import date, datetime
-    params: dict = {}
-    if outlet:
-        params["Outlet"] = outlet
-    rows = await client.request("GET", "/api/v3/Receivable",
-                                params=params if params else None)
-    rows = rows if isinstance(rows, list) else []
-    if min_days_overdue is not None:
-        today = date.today()
-        filtered = []
-        for r in rows:
-            due_raw = r.get("DueDate", "")
-            if due_raw:
-                try:
-                    due = datetime.fromisoformat(due_raw[:10]).date()
-                    days = (today - due).days
-                    if days >= min_days_overdue:
-                        filtered.append(dict(r, DaysOverdue=days))
-                except ValueError:
-                    pass
-        rows = filtered
-    total = sum(_num(r.get("Total") or r.get("Amount") or 0) for r in rows)
-    return {"count": len(rows), "total": total, "receivables": rows}
+                          min_days_overdue: int | None = None,
+                          date_from: str | None = None, date_to: str | None = None) -> dict:
+    """Unpaid and partly-paid invoices (receivables), newest window first-class.
+
+    DealPOS has no receivables endpoint (GET /api/v3/Receivable 404s), so this reads
+    Invoice/WithTotalCount and keeps rows whose Payment is Unpaid or Partial. Exceed
+    (overpaid) and Paid are excluded. Window defaults to the last 365 days.
+
+    Caveats, both live-verified 2026-11-08:
+    - Partial rows are counted at their full Amount; the paid part is not in the list row.
+    - The result includes marketplace settlements still pending (TikTok/Shopee, no due
+      date) and internal entries (customer 'MF DISPLAY/B-STOCK ...'). Filter by Customer.
+    DaysOverdue is None when an invoice has no due date, so min_days_overdue skips those.
+    """
+    today = date.today()
+    inv = await list_invoices(
+        client, date_from or (today - timedelta(days=365)).isoformat(),
+        date_to or today.isoformat(), outlet=outlet, page_size=500)
+    rows = []
+    for r in inv["invoices"]:
+        if r.get("Payment") not in ("Unpaid", "Partial"):
+            continue
+        due = _due_date(r.get("Due"))
+        days = (today - due).days if due else None
+        if min_days_overdue is not None and (days is None or days < min_days_overdue):
+            continue
+        rows.append(dict(r, DaysOverdue=days))
+    out = {"count": len(rows), "total": sum(_invoice_amount(r) for r in rows),
+           "receivables": rows}
+    if any(r.get("Payment") == "Partial" for r in rows):
+        out["note"] = "Partial invoices are totalled at full Amount; the paid part is not in the list data."
+    for k in ("truncated", "warning"):
+        if k in inv:
+            out[k] = inv[k]
+    return out
 
 
 # --- products write (general) ---
@@ -701,7 +721,6 @@ async def adjust_stock(client: DealPOSClient, items: list[dict],
             "Adjustment requires an outlet and DEALPOS_DEFAULT_OUTLET is unset "
             "in .env — the API rejects the adjustment without one."
         )
-    from datetime import date, datetime
     body: dict = {
         "Outlet": client.s.default_outlet,
         "Date": date.today().strftime("%Y/%m/%d"),

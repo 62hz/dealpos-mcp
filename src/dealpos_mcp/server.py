@@ -166,10 +166,16 @@ async def list_suppliers() -> list[dict]:
 
 @mcp.tool()
 async def get_receivables(outlet: str | None = None,
-                          min_days_overdue: int | None = None) -> dict:
-    """List outstanding receivables. min_days_overdue filters to overdue only."""
+                          min_days_overdue: int | None = None,
+                          date_from: str | None = None,
+                          date_to: str | None = None) -> dict:
+    """Unpaid and partly-paid invoices over a window (default: last 365 days, YYYY-MM-DD
+    dates). min_days_overdue keeps only invoices past due (skips ones with no due date).
+    Includes pending TikTok/Shopee settlements and internal 'MF DISPLAY/B-STOCK' entries:
+    group by Customer to separate them from real customer debts."""
     return await tools.get_receivables(_client, outlet=outlet,
-                                       min_days_overdue=min_days_overdue)
+                                       min_days_overdue=min_days_overdue,
+                                       date_from=date_from, date_to=date_to)
 
 
 @mcp.tool()

@@ -443,31 +443,71 @@ async def test_list_sales_orders_raises_not_available(client):
 
 # --- get_receivables ---
 
-@respx.mock
-async def test_get_receivables_returns_all(client):
-    _token()
-    respx.get(f"{BASE}/api/v3/Receivable").mock(
-        return_value=httpx.Response(200, json=[
-            {"Total": 500000, "DueDate": "2026-01-01T00:00:00"}]))
-    out = await tools.get_receivables(client)
-    assert out["count"] == 1
-    assert out["total"] == 500000.0
+def _recv_rows(overdue, recent):
+    """Invoice rows as live Invoice/WithTotalCount returns them. Due 0001-01-01 = none."""
+    none = "0001-01-01T00:00:00"
+    return [
+        dict(_inv(1, 500000, "Paid"), Due=overdue),       # paid: never a receivable
+        dict(_inv(2, 100000, "Unpaid"), Due=overdue),
+        dict(_inv(3, 200000, "Unpaid"), Due=recent),
+        dict(_inv(4, 300000, "Unpaid"), Due=none),        # marketplace settlement, no due
+        dict(_inv(5, 50000, "Partial"), Due=overdue),
+        dict(_inv(6, 70000, "Exceed"), Due=overdue),      # overpaid: not owed to us
+    ]
+
+
+def _mock_invoices(rows):
+    _token(); _outlets()
+    return respx.get(f"{BASE}/api/v3/Invoice/WithTotalCount").mock(
+        return_value=httpx.Response(200, json={"Data": rows, "TotalCount": len(rows)}))
 
 
 @respx.mock
-async def test_get_receivables_overdue_filter(client):
+async def test_get_receivables_keeps_only_unpaid_and_partial(client):
     from datetime import date, timedelta
-    _token()
-    overdue = (date.today() - timedelta(days=15)).isoformat() + "T00:00:00"
-    recent = (date.today() - timedelta(days=2)).isoformat() + "T00:00:00"
-    respx.get(f"{BASE}/api/v3/Receivable").mock(
-        return_value=httpx.Response(200, json=[
-            {"Total": 100000, "DueDate": overdue},
-            {"Total": 200000, "DueDate": recent},
-        ]))
+    d = lambda n: (date.today() - timedelta(days=n)).isoformat() + "T00:00:00"
+    _mock_invoices(_recv_rows(d(15), d(2)))
+    out = await tools.get_receivables(client)
+    assert {r["Payment"] for r in out["receivables"]} == {"Unpaid", "Partial"}
+    assert out["count"] == 4
+    assert out["total"] == 100000 + 200000 + 300000 + 50000
+    assert "Partial" in out["note"]
+    assert "truncated" not in out
+
+
+@respx.mock
+async def test_get_receivables_days_overdue_and_filter(client):
+    from datetime import date, timedelta
+    d = lambda n: (date.today() - timedelta(days=n)).isoformat() + "T00:00:00"
+    _mock_invoices(_recv_rows(d(15), d(2)))
+    by_amount = {r["Amount"]: r["DaysOverdue"]
+                 for r in (await tools.get_receivables(client))["receivables"]}
+    assert by_amount[100000] == 15 and by_amount[200000] == 2
+    assert by_amount[300000] is None  # 0001-01-01 sentinel is "no due date", not 740k days
+    _mock_invoices(_recv_rows(d(15), d(2)))
     out = await tools.get_receivables(client, min_days_overdue=7)
-    assert out["count"] == 1
-    assert out["receivables"][0]["DaysOverdue"] == 15
+    assert sorted(r["Amount"] for r in out["receivables"]) == [50000, 100000]
+
+
+@respx.mock
+async def test_get_receivables_default_window_is_a_year_with_big_pages(client):
+    from datetime import date, timedelta
+    route = _mock_invoices([])
+    await tools.get_receivables(client)
+    p = route.calls[0].request.url.params
+    assert p["To"] == date.today().isoformat()
+    assert p["From"] == (date.today() - timedelta(days=365)).isoformat()
+    assert p["PageSize"] == "500"
+
+
+@respx.mock
+async def test_get_receivables_passes_through_truncation_warning(client):
+    _token(); _outlets()
+    respx.get(f"{BASE}/api/v3/Invoice/WithTotalCount").mock(
+        return_value=httpx.Response(200, json={"Data": [_inv(1, 1, "Unpaid")] * 500,
+                                               "TotalCount": 99999}))
+    out = await tools.get_receivables(client)
+    assert out["truncated"] is True and "warning" in out
 
 
 # --- update_product ---
