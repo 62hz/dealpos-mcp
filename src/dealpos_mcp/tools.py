@@ -493,10 +493,22 @@ async def _resolve_outlet_id(client: DealPOSClient, outlet: str | None) -> str:
     return str(rows[0].get("ID"))
 
 
-async def list_suppliers(client: DealPOSClient) -> list[dict]:
-    """List all suppliers/vendors."""
-    rows = await client.request("GET", "/api/v3/Supplier")
-    return rows if isinstance(rows, list) else []
+async def list_suppliers(client: DealPOSClient, page_size: int = 100) -> list[dict]:
+    """List all suppliers/vendors, auto-paginating.
+
+    PageNumber and PageSize are REQUIRED by GET /api/v3/Supplier (per the OpenAPI spec);
+    without them the API 500s with "The offset specified in a OFFSET clause may not be
+    negative". Found 2026-11-08 by the live read-tool smoke test.
+    """
+    all_rows: list[dict] = []
+    for page in range(1, 101):  # hard cap: never loop forever if paging is ignored
+        rows = await client.request("GET", "/api/v3/Supplier",
+                                    params={"PageNumber": page, "PageSize": page_size})
+        rows = rows if isinstance(rows, list) else []
+        all_rows.extend(rows)
+        if len(rows) < page_size:
+            break
+    return all_rows
 
 
 # --- financial reports ---

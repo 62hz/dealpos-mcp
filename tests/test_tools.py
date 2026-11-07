@@ -286,10 +286,25 @@ async def test_list_outlets(client):
 @respx.mock
 async def test_list_suppliers(client):
     _token()
-    respx.get(f"{BASE}/api/v3/Supplier").mock(
+    route = respx.get(f"{BASE}/api/v3/Supplier").mock(
         return_value=httpx.Response(200, json=[{"Code": "S01", "Name": "Distro"}]))
     out = await tools.list_suppliers(client)
     assert out[0]["Code"] == "S01"
+    # Regression: the API 500s unless both paging params are sent.
+    p = route.calls[0].request.url.params
+    assert p["PageNumber"] == "1" and p["PageSize"] == "100"
+
+
+@respx.mock
+async def test_list_suppliers_paginates_until_a_short_page(client):
+    _token()
+    route = respx.get(f"{BASE}/api/v3/Supplier").mock(side_effect=[
+        httpx.Response(200, json=[{"Code": "S01"}, {"Code": "S02"}]),
+        httpx.Response(200, json=[{"Code": "S03"}]),
+    ])
+    out = await tools.list_suppliers(client, page_size=2)
+    assert [s["Code"] for s in out] == ["S01", "S02", "S03"]
+    assert route.calls[1].request.url.params["PageNumber"] == "2"
 
 
 # --- get_writeoffs ---
