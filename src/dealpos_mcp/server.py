@@ -40,13 +40,14 @@ async def list_products(name: str | None = None, category: str | None = None,
 
 @mcp.tool()
 async def get_product(code: str) -> dict:
-    """Get one product by its Code (price + details)."""
+    """Get one product by its PRODUCT code (the `Code` on a list_products row; price +
+    details). A variant code (Variants[].Code) is rejected: use get_variant_detail."""
     return await tools.get_product(_client, code)
 
 
 @mcp.tool()
 async def get_variant_detail(code: str) -> dict:
-    """Get one variant by its Code, including Type/Components/Weight -- fields
+    """Get one variant by its VARIANT code (Variants[].Code), including Type/Components/Weight -- fields
     get_product's compact Variants[] omits. Use to verify a composite conversion or
     weight write actually landed, rather than trusting the write tool's own response."""
     return await tools.get_variant_detail(_client, code)
@@ -142,7 +143,8 @@ async def list_inventory(outlet: str | None = None,
 @mcp.tool()
 async def list_customers(name: str | None = None, email: str | None = None,
                          phone: str | None = None) -> list[dict]:
-    """Search customers by name, email, or phone."""
+    """List all customers, or search by name (server-side), email or phone (matched here,
+    since DealPOS ignores those two filters)."""
     return await tools.list_customers(_client, name=name, email=email, phone=phone)
 
 
@@ -213,11 +215,13 @@ async def get_inventory_by_codes(codes: list[str],
 
 
 @mcp.tool()
-async def get_inventory_log(code: str | None = None, date_from: str | None = None,
-                             date_to: str | None = None) -> list[dict]:
-    """Stock movement history. Filter by product code and/or date range."""
+async def get_inventory_log(code: str, date_from: str | None = None,
+                             date_to: str | None = None,
+                             outlet: str | None = None) -> list[dict]:
+    """Stock movement history for ONE variant. `code` is a VARIANT code (required);
+    optionally narrow by outlet name and YYYY-MM-DD date range."""
     return await tools.get_inventory_log(_client, code=code, date_from=date_from,
-                                          date_to=date_to)
+                                          date_to=date_to, outlet=outlet)
 
 
 @mcp.tool()

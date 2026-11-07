@@ -167,6 +167,19 @@ async def test_invoice_known_day_totals(live):
     assert "truncated" not in out
 
 
+async def test_list_customers_reads_past_one_page(live):
+    """Only page 1 of 50 was read before; the store had 168 customers on 2026-11-08."""
+    assert len(await tools.list_customers(live)) > 50
+
+
+async def test_compact_product_code_feeds_get_product(live):
+    """list_products must keep the PRODUCT code, or get_product has nothing to take."""
+    prods = await tools.list_products(live, name="KM5")
+    assert prods and prods[0].get("Code"), "compact list_products rows lost their Code"
+    got = await tools.get_product(live, prods[0]["Code"])
+    assert got.get("Code") == prods[0]["Code"]
+
+
 async def test_sales_orders_is_explicitly_unavailable(live):
     """Pinned deliberately: if DealPOS ever adds a GET, this fails and we revisit."""
     from dealpos_mcp.client import DealPOSError

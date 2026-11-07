@@ -241,13 +241,37 @@ async def test_list_customers_name_filter(client):
     assert route.calls[0].request.url.params["Name"] == "Alice"
 
 
+_CUSTOMERS = [
+    {"Code": "C1", "Name": "Alice", "Email": "Alice@Test.com", "Mobile": "+62 812-1111"},
+    {"Code": "C2", "Name": "Bob", "Email": "bob@test.com", "Mobile": "0813-2222"},
+    {"Code": "C3", "Name": "Cy", "Email": None, "Mobile": None},
+]
+
+
 @respx.mock
-async def test_list_customers_email_filter(client):
+async def test_list_customers_filters_email_and_phone_client_side(client):
+    """Regression: DealPOS ignores Email/MobilePhone (returned all 168 live), and the
+    phone column is `Mobile`. The filters must be applied here."""
     _token()
     route = respx.get(f"{BASE}/api/v3/Customer").mock(
-        return_value=httpx.Response(200, json=[]))
-    await tools.list_customers(client, email="alice@test.com")
-    assert route.calls[0].request.url.params["Email"] == "alice@test.com"
+        return_value=httpx.Response(200, json=_CUSTOMERS))
+    assert [r["Code"] for r in await tools.list_customers(client, email="ALICE@test")] == ["C1"]
+    assert [r["Code"] for r in await tools.list_customers(client, phone="0812 1111")] == []
+    assert [r["Code"] for r in await tools.list_customers(client, phone="812-1111")] == ["C1"]
+    p = route.calls[0].request.url.params
+    assert "Email" not in p and "MobilePhone" not in p
+
+
+@respx.mock
+async def test_list_customers_pages_until_short_page(client):
+    """Regression: only page 1 of 50 was read, hiding 118 of 168 customers."""
+    _token()
+    pages = {"1": [{"Code": "A"}, {"Code": "B"}], "2": [{"Code": "C"}]}
+    route = respx.get(f"{BASE}/api/v3/Customer").mock(
+        side_effect=lambda req: httpx.Response(200, json=pages.get(req.url.params["PageNumber"], [])))
+    out = await tools.list_customers(client, page_size=2)
+    assert [r["Code"] for r in out] == ["A", "B", "C"]
+    assert [c.request.url.params["PageNumber"] for c in route.calls] == ["1", "2"]
 
 
 @respx.mock
@@ -553,15 +577,30 @@ async def test_get_inventory_by_codes_outlet(client):
 # --- get_inventory_log ---
 
 @respx.mock
-async def test_get_inventory_log_no_filter(client):
+async def test_get_inventory_log_sends_code_only_no_paging(client):
     _token()
     route = respx.get(f"{BASE}/api/v3/Inventory/Log").mock(
         return_value=httpx.Response(200, json=[{"Code": "A", "Change": -1}]))
-    out = await tools.get_inventory_log(client)
+    out = await tools.get_inventory_log(client, "VNL-001")
     p = route.calls[0].request.url.params
-    assert p["PageNumber"] == "1"
-    assert "Code" not in p
+    assert p["Code"] == "VNL-001"
+    assert "PageNumber" not in p and "PageSize" not in p  # endpoint has no paging
     assert len(out) == 1
+
+
+async def test_get_inventory_log_requires_a_code(client):
+    """Live 400: the endpoint needs Code or VariantID."""
+    with pytest.raises(DealPOSError, match="variant code"):
+        await tools.get_inventory_log(client, "")
+
+
+@respx.mock
+async def test_get_inventory_log_outlet(client):
+    _token()
+    route = respx.get(f"{BASE}/api/v3/Inventory/Log").mock(
+        return_value=httpx.Response(200, json=[]))
+    await tools.get_inventory_log(client, "VNL-001", outlet="MF Store")
+    assert route.calls[0].request.url.params["Outlet"] == "MF Store"
 
 
 @respx.mock
@@ -989,7 +1028,7 @@ async def test_list_products_compact_strips_heavy_fields(client):
     respx.get("https://doubledeer.dealpos.co.id/api/v3/Product").mock(
         return_value=httpx.Response(200, json={
             "DataArray": [{
-                "ID": "p1", "Category": "Vinyl Import", "Name": "Vinyl A",
+                "ID": "p1", "Code": "VINYL-A", "Category": "Vinyl Import", "Name": "Vinyl A",
                 "Brand": "Test Brand", "SupplierName": "Test Supplier",
                 "Released": "2026-06-06T00:00:00", "Discontinued": False,
                 "Description": "A" * 500,
@@ -1009,6 +1048,7 @@ async def test_list_products_compact_strips_heavy_fields(client):
     assert len(out) == 1
     p = out[0]
     assert p["Name"] == "Vinyl A"
+    assert p["Code"] == "VINYL-A"  # product code: get_product needs it, variant code 400s
     assert p["Category"] == "Vinyl Import"
     assert p["Brand"] == "Test Brand"
     assert p["SupplierName"] == "Test Supplier"

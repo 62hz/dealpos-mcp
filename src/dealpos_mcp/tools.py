@@ -142,11 +142,12 @@ async def check_low_stock(client: DealPOSClient, fallback_threshold: int | None 
 # --- products read ---
 
 def _compact_product(p: dict) -> dict:
-    """Keep only ID, Category, Name, Brand, SupplierName, Released, Discontinued, and a
-    trimmed Variants list — any other field (including Description/ImageURL/ThumbnailURL)
-    is dropped."""
+    """Keep only ID, Code, Category, Name, Brand, SupplierName, Released, Discontinued, and
+    a trimmed Variants list — any other field (including Description/ImageURL/ThumbnailURL)
+    is dropped. Code is the PRODUCT code that get_product takes; each variant has its own."""
     return {
         "ID": p.get("ID"),
+        "Code": p.get("Code"),
         "Category": p.get("Category"),
         "Name": p.get("Name"),
         "Brand": p.get("Brand"),
@@ -177,8 +178,8 @@ async def list_products(client: DealPOSClient, name: str | None = None,
     short page rather than a total count.
 
     By default (``compact=True``) each product/variant is reduced to a whitelist of
-    fields — product: ID, Category, Name, Brand, SupplierName, Released, Discontinued,
-    Variants; variant: ID, Code, Model, UnitCost, UnitPrice, Discontinued. Any other
+    fields — product: ID, Code, Category, Name, Brand, SupplierName, Released,
+    Discontinued, Variants; variant: ID, Code, Model, UnitCost, UnitPrice, Discontinued. Any other
     field (including Description/ImageURL/ThumbnailURL, which make up most of the
     payload size on a full-catalog pull) is dropped. Pass ``compact=False`` to get the
     raw API objects (e.g. before calling ``update_product`` on a specific item).
@@ -204,12 +205,16 @@ async def list_products(client: DealPOSClient, name: str | None = None,
 
 
 async def get_product(client: DealPOSClient, code: str) -> dict:
-    """Get a single product by its Code."""
+    """Get a single product by its PRODUCT Code (the Code on a list_products row).
+
+    A variant code is a different thing and 400s here; use get_variant_detail for that.
+    """
     return await client.request("GET", "/api/v3/Product/Code", params={"Code": code})
 
 
 async def get_variant_detail(client: DealPOSClient, code: str) -> dict:
-    """Get a single variant by its Code, including Type, Components and Weight.
+    """Get a single variant by its VARIANT Code (a Variants[].Code), including Type,
+    Components and Weight.
 
     get_product's Variants[] is compact and omits these fields entirely, so a composite
     conversion or weight write can't be verified through it. Use this to confirm a write
@@ -450,17 +455,34 @@ async def create_customer(client: DealPOSClient, name: str, email: str,
 
 async def list_customers(client: DealPOSClient, name: str | None = None,
                          email: str | None = None, phone: str | None = None,
-                         page_size: int = 50) -> list[dict]:
-    """List customers, optionally filtered by name, email, or phone."""
-    params: dict = {"PageNumber": 1, "PageSize": page_size}
+                         page_size: int = 500) -> list[dict]:
+    """List all customers, auto-paginating; optionally filtered by name, email or phone.
+
+    Only Name is filtered by DealPOS. Live-verified 2026-11-08: GET /Customer silently
+    ignores Email and MobilePhone and returns everyone, and the phone column is `Mobile`.
+    So email (substring, case-insensitive) and phone (digits substring of Mobile) are
+    applied here, after the pages are fetched.
+    """
+    page_size = min(page_size, 500)
+    params: dict = {"PageSize": page_size}
     if name:
         params["Name"] = name
+    rows: list[dict] = []
+    for page in range(1, 21):  # hard cap: never loop forever if paging is ignored
+        batch = await client.request("GET", "/api/v3/Customer",
+                                     params={**params, "PageNumber": page})
+        batch = batch if isinstance(batch, list) else []
+        rows.extend(batch)
+        if len(batch) < page_size:
+            break
     if email:
-        params["Email"] = email
+        rows = [r for r in rows if email.lower() in str(r.get("Email") or "").lower()]
     if phone:
-        params["MobilePhone"] = phone
-    rows = await client.request("GET", "/api/v3/Customer", params=params)
-    return rows if isinstance(rows, list) else []
+        digits = "".join(ch for ch in phone if ch.isdigit())
+        rows = [r for r in rows
+                if digits and digits in "".join(ch for ch in str(r.get("Mobile") or "")
+                                                 if ch.isdigit())]
+    return rows
 
 
 # --- catalogue meta ---
@@ -680,14 +702,21 @@ async def get_inventory_by_codes(client: DealPOSClient, codes: list[str],
     return rows if isinstance(rows, list) else []
 
 
-async def get_inventory_log(client: DealPOSClient, code: str | None = None,
+async def get_inventory_log(client: DealPOSClient, code: str,
                              date_from: str | None = None,
                              date_to: str | None = None,
-                             page_size: int = 100) -> list[dict]:
-    """Stock movement history — sales, adjustments, PO receives."""
-    params: dict = {"PageNumber": 1, "PageSize": page_size}
-    if code:
-        params["Code"] = code
+                             outlet: str | None = None) -> list[dict]:
+    """Stock movement history for ONE variant — sales, adjustments, PO receives.
+
+    `code` is a VARIANT code and is required: the endpoint serves one variant (Code or
+    VariantID) and has no paging, so there is no all-variants log. Optional outlet name
+    and From/To dates (YYYY-MM-DD) narrow it.
+    """
+    if not code:
+        raise DealPOSError("get_inventory_log needs a variant code.")
+    params: dict = {"Code": code}
+    if outlet:
+        params["Outlet"] = outlet
     if date_from:
         params["From"] = date_from
     if date_to:
