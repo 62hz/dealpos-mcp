@@ -158,6 +158,15 @@ async def test_invoice_total_is_the_sum_of_row_amounts(live):
         sum(float(r.get("Amount") or 0) for r in out["invoices"]))
 
 
+async def test_invoice_known_day_totals(live):
+    """2026-06-05 had 16 invoices summing Rp12,424,000 (checked 2026-11-08). A drift here
+    means invoices were voided/edited after the fact, or the sum/paging logic broke."""
+    out = await tools.list_invoices(live, "2026-06-05", "2026-06-05")
+    assert (out["count"], out["total_count"]) == (16, 16)
+    assert out["total_net"] == 12_424_000
+    assert "truncated" not in out
+
+
 async def test_sales_orders_is_explicitly_unavailable(live):
     """Pinned deliberately: if DealPOS ever adds a GET, this fails and we revisit."""
     from dealpos_mcp.client import DealPOSError

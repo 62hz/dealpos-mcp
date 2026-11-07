@@ -532,9 +532,18 @@ async def get_writeoffs(client: DealPOSClient, date_from: str, date_to: str,
     }
 
 
+def _invoice_amount(row: dict) -> float:
+    """Invoice/WithTotalCount rows carry the invoice value in `Amount` (live-verified
+    2026-11-08). Total/GrandTotal are fallbacks for other shapes, never the primary."""
+    for key in ("Amount", "Total", "GrandTotal"):
+        if row.get(key) is not None:
+            return _num(row[key])
+    return 0.0
+
+
 async def list_invoices(client: DealPOSClient, date_from: str, date_to: str,
                         customer_code: str | None = None, outlet: str | None = None,
-                        page_size: int = 50, page_number: int = 1) -> dict:
+                        page_size: int = 50, max_pages: int = 20) -> dict:
     """List invoices/transactions. date_from and date_to are REQUIRED.
 
     Uses /api/v3/Invoice/WithTotalCount. Bare /api/v3/Invoice is the CREATE
@@ -542,28 +551,41 @@ async def list_invoices(client: DealPOSClient, date_from: str, date_to: str,
     all four of OutletID (a GUID, not a name), PageNumber, PageSize, From, To —
     omitting the dates gives 500 "Value cannot be null (Parameter 's')" and
     omitting paging gives 400 "Page number and row count must be greater than zero".
+
+    Pages until a short page or TotalCount is reached. Rows pass through whole
+    (Number, Customer, Date, Due, Amount, Payment, Delivery, Fulfillment, ID ...).
+    If max_pages stops it early, `truncated` and `warning` are set and total_net
+    covers only the rows returned.
     """
     outlet_id = await _resolve_outlet_id(client, outlet)
-    params: dict = {
-        "OutletID": outlet_id,
-        "PageNumber": page_number,
-        "PageSize": page_size,
-        "From": date_from,
-        "To": date_to,
-    }
+    params: dict = {"OutletID": outlet_id, "PageSize": page_size,
+                    "From": date_from, "To": date_to}
     if customer_code:
         params["CustomerCode"] = customer_code
-    data = await client.request("GET", "/api/v3/Invoice/WithTotalCount", params=params)
-    # Response is an envelope: {"Data": [...], "TotalCount": n}
-    if isinstance(data, dict):
-        rows = data.get("Data") or []
-        total_count = data.get("TotalCount")
-    else:
-        rows = data if isinstance(data, list) else []
-        total_count = None
-    total_net = sum(_num(r.get("Total") or r.get("GrandTotal") or 0) for r in rows)
-    return {"count": len(rows), "total_count": total_count,
-            "total_net": total_net, "invoices": rows}
+    all_rows: list[dict] = []
+    total_count = None
+    truncated = True
+    for page in range(1, max_pages + 1):
+        data = await client.request("GET", "/api/v3/Invoice/WithTotalCount",
+                                    params={**params, "PageNumber": page})
+        # Response is an envelope: {"Data": [...], "TotalCount": n}
+        if isinstance(data, dict):
+            rows = data.get("Data") or []
+            total_count = data.get("TotalCount", total_count)
+        else:
+            rows = data if isinstance(data, list) else []
+        all_rows.extend(rows)
+        if len(rows) < page_size or (total_count is not None and len(all_rows) >= total_count):
+            truncated = False
+            break
+    out = {"count": len(all_rows), "total_count": total_count,
+           "total_net": sum(_invoice_amount(r) for r in all_rows), "invoices": all_rows}
+    if truncated:
+        out["truncated"] = True
+        out["warning"] = (f"Stopped after {max_pages} pages: {len(all_rows)} of "
+                          f"{total_count} invoices returned, so total_net is partial. "
+                          "Narrow the date range.")
+    return out
 
 
 async def list_sales_orders(client: DealPOSClient, date_from: str | None = None,

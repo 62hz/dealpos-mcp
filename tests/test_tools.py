@@ -351,18 +351,53 @@ def _outlets():
              "Code": "B1", "Suspended": False}]))
 
 
+def _inv(n, amount, payment="Paid"):
+    """Row shaped like a live Invoice/WithTotalCount row (keys checked 2026-11-08)."""
+    return {"Number": f"BC.D8.0605{n:04d}", "Customer": "Walk-in", "Date": "2026-06-05T00:00:00",
+            "Due": "2026-06-05T00:00:00", "Amount": amount, "Payment": payment,
+            "Delivery": "Delivered", "Fulfillment": "Fulfilled", "ID": f"id-{n}"}
+
+
 @respx.mock
-async def test_list_invoices_sums_total_from_envelope(client):
+async def test_list_invoices_sums_amount_from_envelope(client):
+    """Regression: rows carry `Amount`; summing Total/GrandTotal gave total_net == 0."""
     _token(); _outlets()
     respx.get(f"{BASE}/api/v3/Invoice/WithTotalCount").mock(
         return_value=httpx.Response(200, json={
-            "Data": [{"Number": "B1.26.08.00005", "Total": 100000},
-                     {"Number": "B1.26.08.00006", "Total": 50000}],
-            "TotalCount": 2}))
+            "Data": [_inv(1, 100000), _inv(2, 50000, "Unpaid")], "TotalCount": 2}))
     out = await tools.list_invoices(client, date_from="2026-01-01", date_to="2026-06-30")
     assert out["total_net"] == 150000.0
     assert out["count"] == 2
     assert out["total_count"] == 2
+    assert "truncated" not in out
+    assert out["invoices"][1]["Payment"] == "Unpaid"  # rows pass through whole
+
+
+@respx.mock
+async def test_list_invoices_pages_until_total_count(client):
+    _token(); _outlets()
+    pages = {"1": [_inv(1, 10), _inv(2, 20)], "2": [_inv(3, 30)]}
+    route = respx.get(f"{BASE}/api/v3/Invoice/WithTotalCount").mock(
+        side_effect=lambda req: httpx.Response(200, json={
+            "Data": pages.get(req.url.params["PageNumber"], []), "TotalCount": 3}))
+    out = await tools.list_invoices(client, date_from="2026-06-01", date_to="2026-06-30",
+                                    page_size=2)
+    assert [c.request.url.params["PageNumber"] for c in route.calls] == ["1", "2"]
+    assert out["count"] == 3 and out["total_net"] == 60.0
+    assert "truncated" not in out
+
+
+@respx.mock
+async def test_list_invoices_warns_when_page_cap_hit(client):
+    _token(); _outlets()
+    respx.get(f"{BASE}/api/v3/Invoice/WithTotalCount").mock(
+        return_value=httpx.Response(200, json={
+            "Data": [_inv(1, 10), _inv(2, 20)], "TotalCount": 99}))
+    out = await tools.list_invoices(client, date_from="2026-06-01", date_to="2026-06-30",
+                                    page_size=2, max_pages=3)
+    assert out["truncated"] is True
+    assert "3 pages" in out["warning"] and "99" in out["warning"]
+    assert out["count"] == 6
 
 
 @respx.mock

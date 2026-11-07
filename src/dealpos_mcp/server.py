@@ -184,7 +184,9 @@ async def list_invoices(date_from: str, date_to: str,
                         customer_code: str | None = None,
                         outlet: str | None = None) -> dict:
     """List invoices/transactions in a date range. Both dates are REQUIRED
-    (the DealPOS endpoint 500s without them)."""
+    (the DealPOS endpoint 500s without them). Pages automatically; each row has
+    Amount, Payment (Paid/Unpaid/Partial/Exceed), Delivery, Fulfillment. If the
+    result has `truncated`, total_net is partial: narrow the range."""
     return await tools.list_invoices(_client, date_from=date_from, date_to=date_to,
                                      customer_code=customer_code, outlet=outlet)
 
