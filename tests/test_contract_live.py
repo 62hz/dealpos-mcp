@@ -43,11 +43,62 @@ WINDOW = ("2026-06-01", "2026-06-30")  # a month known to contain sales
 
 @pytest.fixture
 async def live():
-    c = DealPOSClient(Settings())
+    # read_only=True is forced (init kwargs beat env/.env), so this file can never write
+    # even if DEALPOS_READ_ONLY=false is set for real use.
+    c = DealPOSClient(Settings(read_only=True))
     try:
         yield c
     finally:
         await c.aclose()
+
+
+# One live call per read tool. A new read tool must be added here: test_server.py's
+# test_every_read_tool_has_a_live_call fails if it isn't, so a tool can't ship without
+# a live call. get_pricebook is the one exception: it needs a pricebook name no read
+# tool can list.
+READS = {
+    "get_sales_summary": lambda c, s: tools.get_sales_summary(c, *WINDOW),
+    "get_daily_sales": lambda c, s: tools.get_daily_sales(c, 2026),
+    "check_low_stock": lambda c, s: tools.check_low_stock(c),
+    "list_products": lambda c, s: tools.list_products(c, name=s["product"]),
+    "get_product": lambda c, s: tools.get_product(c, s["product"]),
+    "get_variant_detail": lambda c, s: tools.get_variant_detail(c, s["variant"]),
+    "list_inventory": lambda c, s: tools.list_inventory(c),
+    "list_customers": lambda c, s: tools.list_customers(c),
+    "list_categories": lambda c, s: tools.list_categories(c),
+    "list_outlets": lambda c, s: tools.list_outlets(c),
+    "list_suppliers": lambda c, s: tools.list_suppliers(c),
+    "get_receivables": lambda c, s: tools.get_receivables(c),
+    "get_writeoffs": lambda c, s: tools.get_writeoffs(c, *WINDOW),
+    "list_invoices": lambda c, s: tools.list_invoices(c, *WINDOW),
+    "get_inventory_by_codes": lambda c, s: tools.get_inventory_by_codes(c, [s["variant"]]),
+    "get_inventory_log": lambda c, s: tools.get_inventory_log(c, code=s["variant"]),
+    "get_inbound_logistics": lambda c, s: tools.get_inbound_logistics(c, *WINDOW),
+}
+
+
+async def test_every_read_tool_succeeds_live(live):
+    """Catches dead endpoints and missing required params, which mocks cannot.
+
+    One test on purpose, not one per tool: the API allows only 50 requests per 180 s
+    with no queue (GET /api/v3/ratelimit), so a per-tool test that re-authenticates and
+    re-discovers a sample each time exhausts the budget. All failures are reported together.
+    """
+    # Discover a real product/variant code once instead of hardcoding one.
+    prods = await tools.list_products(live, compact=False)
+    p = next((p for p in prods if p.get("Code") and p.get("Variants")), None)
+    assert p, "no product with a Code and variants found; cannot pick a sample"
+    sample = {"product": p["Code"], "variant": p["Variants"][0]["Code"]}
+
+    failures = []
+    for name in sorted(READS):
+        try:
+            result = await READS[name](live, sample)
+            if not isinstance(result, (dict, list)):
+                failures.append(f"{name}: returned {type(result).__name__}")
+        except Exception as e:  # noqa: BLE001 - we want every tool's failure, not the first
+            failures.append(f"{name}: {type(e).__name__}: {str(e)[:160]}")
+    assert not failures, "read tools failing against the live API:\n  " + "\n  ".join(failures)
 
 
 async def test_product_sold_returns_the_fields_we_sum(live):
@@ -96,6 +147,15 @@ async def test_invoice_list_envelope_and_guid(live):
     assert out["count"] > 0, "no invoices in window"
     assert out["total_count"] is not None, "expected the WithTotalCount envelope"
     assert "Number" in out["invoices"][0]
+
+
+async def test_invoice_total_is_the_sum_of_row_amounts(live):
+    """Guards the total_net == 0 bug: rows carry `Amount`, not Total/GrandTotal."""
+    out = await tools.list_invoices(live, date_from=WINDOW[0], date_to=WINDOW[1])
+    assert out["invoices"], "no invoices in window"
+    assert out["total_net"] > 0
+    assert out["total_net"] == pytest.approx(
+        sum(float(r.get("Amount") or 0) for r in out["invoices"]))
 
 
 async def test_sales_orders_is_explicitly_unavailable(live):
