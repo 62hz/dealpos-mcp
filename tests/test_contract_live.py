@@ -86,6 +86,8 @@ READS = {
     "get_inventory_by_codes": lambda c, s: tools.get_inventory_by_codes(c, [s["variant"]]),
     "get_inventory_log": lambda c, s: tools.get_inventory_log(c, code=s["variant"]),
     "get_inbound_logistics": lambda c, s: tools.get_inbound_logistics(c, *WINDOW),
+    "list_adjustments": lambda c, s: tools.list_adjustments(c, "2026-10-01", "2026-10-31"),
+    "get_adjustment": lambda c, s: tools.get_adjustment(c, adjustment_id=s["adjustment_id"]),
 }
 
 
@@ -100,7 +102,10 @@ async def test_every_read_tool_succeeds_live(live):
     prods = await tools.list_products(live, compact=False)
     p = next((p for p in prods if p.get("Code") and p.get("Variants")), None)
     assert p, "no product with a Code and variants found; cannot pick a sample"
-    sample = {"product": p["Code"], "variant": p["Variants"][0]["Code"]}
+    adjs = (await tools.list_adjustments(live, "2026-01-01", "2026-12-31"))["adjustments"]
+    assert adjs, "no adjustments this year; cannot pick a sample for get_adjustment"
+    sample = {"product": p["Code"], "variant": p["Variants"][0]["Code"],
+              "adjustment_id": adjs[0]["ID"]}
 
     failures = []
     for name in sorted(READS):
@@ -190,6 +195,23 @@ async def test_compact_product_code_feeds_get_product(live):
     assert prods and prods[0].get("Code"), "compact list_products rows lost their Code"
     got = await tools.get_product(live, prods[0]["Code"])
     assert got.get("Code") == prods[0]["Code"]
+
+
+async def test_adjustment_reads_agree_and_number_needs_outlet(live):
+    """List row, lookup by ID and lookup by Number+Outlet must describe one adjustment."""
+    from dealpos_mcp.client import DealPOSError
+    rows = (await tools.list_adjustments(live, "2026-01-01", "2026-12-31",
+                                         adjustment_type="Adjust"))["adjustments"]
+    assert rows and all(r["Type"] == "Adjust" for r in rows), "Type filter not honoured"
+    r = rows[0]
+    by_id = await tools.get_adjustment(live, adjustment_id=r["ID"])
+    by_no = await tools.get_adjustment(live, number=r["Number"], outlet=r["Outlet"])
+    assert by_id["Number"] == by_no["Number"] == r["Number"]
+    assert by_id["State"] == by_no["State"] == r["State"]
+    assert by_id["AdjustedInventory"], "an Adjust row should carry at least one line"
+    assert "ImageUrl" not in by_id["AdjustedInventory"][0]
+    with pytest.raises(DealPOSError, match="not be found"):  # why get_adjustment demands an outlet
+        await live.request("GET", "/api/v3/Adjustment/Detail", params={"Number": r["Number"]})
 
 
 async def test_sales_orders_is_explicitly_unavailable(live):

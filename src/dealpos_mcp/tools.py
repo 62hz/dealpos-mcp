@@ -739,6 +739,74 @@ async def get_inventory_log(client: DealPOSClient, code: str,
     return rows if isinstance(rows, list) else []
 
 
+# --- stock adjustment reads ---
+
+_ADJUSTMENT_LINE_NOISE = ("ImageUrl", "ThumbnailUrl", "Parents")  # bulky, never needed
+
+
+async def list_adjustments(client: DealPOSClient, date_from: str | None = None,
+                           date_to: str | None = None, outlet: str | None = None,
+                           state: str | None = None, adjustment_type: str | None = None,
+                           page_size: int = 500, max_pages: int = 20) -> dict:
+    """List stock adjustments (GET /api/v3/Adjustment), paged. Dates are YYYY-MM-DD.
+
+    Rows carry ID, Number, Date, Outlet, Type, State, QuantitySUM, SKUCount, TotalCost,
+    PIC, Note. Live-verified 2026-11-08 filter values: `state` is one of Draft, InReview,
+    Pending, Rejected, Accepted (the spec's "Approved" is rejected by the API);
+    `adjustment_type` is Adjust (a quantity delta, e.g. web checkout) or Count (stock take).
+    If max_pages stops it early, `truncated` and `warning` are set.
+    """
+    params: dict = {"PageSize": page_size}
+    for key, val in (("From", date_from), ("To", date_to), ("Outlet", outlet),
+                     ("State", state), ("Type", adjustment_type)):
+        if val:
+            params[key] = val
+    rows: list[dict] = []
+    truncated = True
+    for page in range(1, max_pages + 1):
+        batch = await client.request("GET", "/api/v3/Adjustment",
+                                     params={**params, "PageNumber": page})
+        batch = batch if isinstance(batch, list) else []
+        rows.extend(batch)
+        if len(batch) < page_size:
+            truncated = False
+            break
+    out: dict = {"count": len(rows), "adjustments": rows}
+    if truncated:
+        out["truncated"] = True
+        out["warning"] = (f"Stopped after {max_pages} pages ({len(rows)} adjustments); "
+                          "there may be more. Narrow the date range.")
+    return out
+
+
+async def get_adjustment(client: DealPOSClient, number: str | None = None,
+                         adjustment_id: str | None = None,
+                         outlet: str | None = None) -> dict:
+    """One adjustment with its lines (AdjustedInventory: Code, Variant, Quantity, costs).
+
+    Give `adjustment_id` (the ID on a list_adjustments row), or `number` plus its outlet:
+    a Number alone is "not found" live (2026-11-08), so outlet falls back to
+    DEALPOS_DEFAULT_OUTLET. Use it to confirm an adjustment's State and quantities after
+    adjust_stock, instead of trusting the write's own response.
+    """
+    if bool(number) == bool(adjustment_id):
+        raise DealPOSError("get_adjustment needs exactly one of number or adjustment_id.")
+    if adjustment_id:
+        params: dict = {"ID": adjustment_id}
+    else:
+        outlet = outlet or client.s.default_outlet
+        if not outlet:
+            raise DealPOSError("Looking up an adjustment by number needs its outlet "
+                               "(pass outlet, or set DEALPOS_DEFAULT_OUTLET).")
+        params = {"Number": number, "Outlet": outlet}
+    adj = await client.request("GET", "/api/v3/Adjustment/Detail", params=params)
+    if isinstance(adj, dict):
+        for key in ("AdjustedInventory", "CountedInventory"):
+            adj[key] = [{k: v for k, v in line.items() if k not in _ADJUSTMENT_LINE_NOISE}
+                        for line in adj.get(key) or []]
+    return adj
+
+
 # --- stock adjustment ---
 
 async def adjust_stock(client: DealPOSClient, items: list[dict],

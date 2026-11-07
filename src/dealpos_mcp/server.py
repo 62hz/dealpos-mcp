@@ -225,6 +225,27 @@ async def get_inventory_log(code: str, date_from: str | None = None,
 
 
 @mcp.tool()
+async def list_adjustments(date_from: str | None = None, date_to: str | None = None,
+                           outlet: str | None = None, state: str | None = None,
+                           adjustment_type: str | None = None) -> dict:
+    """List stock adjustments, filtered by YYYY-MM-DD dates. state: Draft, InReview,
+    Pending, Rejected or Accepted. adjustment_type: Adjust (quantity delta) or Count
+    (stock take). Check the State of a fresh adjust_stock here."""
+    return await tools.list_adjustments(_client, date_from=date_from, date_to=date_to,
+                                        outlet=outlet, state=state,
+                                        adjustment_type=adjustment_type)
+
+
+@mcp.tool()
+async def get_adjustment(adjustment_id: str | None = None, number: str | None = None,
+                         outlet: str | None = None) -> dict:
+    """One adjustment with its line items. Pass adjustment_id (from list_adjustments), or
+    number together with its outlet name. Use to verify an adjustment after adjust_stock."""
+    return await tools.get_adjustment(_client, number=number, adjustment_id=adjustment_id,
+                                      outlet=outlet)
+
+
+@mcp.tool()
 async def adjust_stock(items: list[dict], notes: str | None = None) -> dict:
     """Create stock adjustment. items: [{code, qty, reason?}] — MUST be a JSON array
     of objects, never a comma-separated string.

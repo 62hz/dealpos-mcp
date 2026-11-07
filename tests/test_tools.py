@@ -658,6 +658,93 @@ async def test_get_inventory_log_code_and_dates(client):
     assert p["To"] == "2026-06-30"
 
 
+# --- list_adjustments / get_adjustment ---
+
+def _adj(n, state="Accepted", typ="Adjust"):
+    """Row shaped like a live Adjustment list row (keys checked 2026-11-08)."""
+    return {"ID": f"id-{n}", "Number": f"MFS-{n}", "Date": "2026-10-01T00:00:00",
+            "Outlet": "MF Store", "Type": typ, "State": state, "QuantitySUM": -1,
+            "SKUCount": 1, "TotalCost": 0, "PIC": "MF Web Checkout", "Note": "x"}
+
+
+@respx.mock
+async def test_list_adjustments_sends_filters_and_returns_rows(client):
+    _token()
+    route = respx.get(f"{BASE}/api/v3/Adjustment").mock(
+        return_value=httpx.Response(200, json=[_adj(1), _adj(2)]))
+    out = await tools.list_adjustments(client, "2026-10-01", "2026-10-31", outlet="MF Store",
+                                       state="Accepted", adjustment_type="Adjust")
+    p = route.calls[0].request.url.params
+    assert (p["From"], p["To"], p["Outlet"]) == ("2026-10-01", "2026-10-31", "MF Store")
+    assert (p["State"], p["Type"], p["PageNumber"], p["PageSize"]) == ("Accepted", "Adjust", "1", "500")
+    assert out["count"] == 2 and "truncated" not in out
+
+
+@respx.mock
+async def test_list_adjustments_omits_unset_filters(client):
+    _token()
+    route = respx.get(f"{BASE}/api/v3/Adjustment").mock(return_value=httpx.Response(200, json=[]))
+    await tools.list_adjustments(client)
+    p = route.calls[0].request.url.params
+    assert not ({"From", "To", "Outlet", "State", "Type"} & set(p))
+
+
+@respx.mock
+async def test_list_adjustments_pages_and_warns_at_the_cap(client):
+    _token()
+    pages = {"1": [_adj(1), _adj(2)], "2": [_adj(3)]}
+    respx.get(f"{BASE}/api/v3/Adjustment").mock(side_effect=lambda req: httpx.Response(
+        200, json=pages.get(req.url.params["PageNumber"], [])))
+    out = await tools.list_adjustments(client, page_size=2)
+    assert out["count"] == 3 and "truncated" not in out
+    respx.get(f"{BASE}/api/v3/Adjustment").mock(
+        return_value=httpx.Response(200, json=[_adj(1), _adj(2)]))
+    capped = await tools.list_adjustments(client, page_size=2, max_pages=3)
+    assert capped["truncated"] is True and "3 pages" in capped["warning"]
+
+
+_DETAIL = {"ID": "id-1", "Number": "MFS-1", "State": "Accepted", "Outlet": "MF Store",
+           "AdjustedInventory": [{"Code": "SKU1", "Quantity": -1, "UnitCost": 5,
+                                  "ImageUrl": "https://x/y.png", "ThumbnailUrl": "t",
+                                  "Parents": ["p"]}],
+           "CountedInventory": []}
+
+
+@respx.mock
+async def test_get_adjustment_by_id_strips_image_noise(client):
+    _token()
+    route = respx.get(f"{BASE}/api/v3/Adjustment/Detail").mock(
+        return_value=httpx.Response(200, json=_DETAIL))
+    out = await tools.get_adjustment(client, adjustment_id="id-1")
+    assert dict(route.calls[0].request.url.params) == {"ID": "id-1"}
+    line = out["AdjustedInventory"][0]
+    assert line == {"Code": "SKU1", "Quantity": -1, "UnitCost": 5}
+
+
+@respx.mock
+async def test_get_adjustment_by_number_sends_the_outlet(client):
+    """Live: Number alone is 'could not be found'; it must travel with Outlet."""
+    _token()
+    route = respx.get(f"{BASE}/api/v3/Adjustment/Detail").mock(
+        return_value=httpx.Response(200, json=_DETAIL))
+    await tools.get_adjustment(client, number="MFS-1", outlet="MF Store")
+    assert dict(route.calls[0].request.url.params) == {"Number": "MFS-1", "Outlet": "MF Store"}
+
+
+async def test_get_adjustment_number_without_any_outlet_raises(monkeypatch):
+    # Hermetic: the shared `client` fixture reads the real .env, which sets a default outlet.
+    monkeypatch.delenv("DEALPOS_DEFAULT_OUTLET", raising=False)
+    c = DealPOSClient(Settings(client_id="cid", client_secret="sec", _env_file=None))
+    with pytest.raises(DealPOSError, match="outlet"):
+        await tools.get_adjustment(c, number="MFS-1")
+
+
+@pytest.mark.parametrize("kw", [{}, {"number": "a", "adjustment_id": "b"}])
+async def test_get_adjustment_needs_exactly_one_key(client, kw):
+    with pytest.raises(DealPOSError, match="exactly one"):
+        await tools.get_adjustment(client, **kw)
+
+
 # --- adjust_stock ---
 
 @respx.mock

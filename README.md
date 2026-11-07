@@ -4,7 +4,7 @@ Local [MCP](https://modelcontextprotocol.io) server that lets Claude read (and, 
 allow it, write) DealPOS data for Medium Format. Runs on your machine over stdio; there
 is no hosted service.
 
-**Read-only by default.** The 18 read tools work out of the box; 17 are called against live
+**Read-only by default.** The 20 read tools work out of the box; 19 are called against live
 DealPOS by `tests/test_contract_live.py` (`get_pricebook` needs a pricebook name, so it is
 the one that is not). The 10 write tools are blocked until you set `DEALPOS_READ_ONLY=false`.
 
@@ -48,7 +48,7 @@ config, never in the repo.
 
 ## Tools
 
-**Read (18, always on)**
+**Read (20, always on)**
 
 | Tool | Returns |
 |------|---------|
@@ -61,7 +61,8 @@ config, never in the repo.
 | `get_pricebook` | One pricebook by name |
 | `list_categories`, `list_outlets`, `list_suppliers`, `list_customers` | Reference data |
 | `list_inventory`, `get_inventory_by_codes`, `check_low_stock` | Stock levels and low-stock list |
-| `get_inventory_log` | Stock movement history |
+| `get_inventory_log` | Stock movement history for one variant (variant code required) |
+| `list_adjustments`, `get_adjustment` | Stock adjustments and their lines. Filter by `state` (Draft, InReview, Pending, Rejected, Accepted) and `adjustment_type` (Adjust, Count); look one up by `adjustment_id`, or by `number` plus outlet. Use after `adjust_stock` to confirm the State |
 | `get_inbound_logistics` | Past PO deliveries |
 
 **Write (10, need `DEALPOS_READ_ONLY=false`)**
