@@ -94,10 +94,15 @@ Keep read-only on unless you actually need to write.
 - List-typed arguments (`codes`, `items`, `variants`, `components`, `outlets`) must be real
   JSON arrays, never comma-separated strings.
 - `list_invoices` needs both `date_from` and `date_to` or DealPOS returns a 500.
-- DealPOS allows 50 requests per 180 seconds with no queue (`GET /api/v3/ratelimit`).
-  Wide reads (long sales ranges, whole-catalogue lists) can use that up; the server then
-  waits out the `Retry-After`, so a call that looks hung is usually waiting for the window
-  to clear. Space heavy runs at least three minutes apart.
+- DealPOS allows 50 requests per 180 seconds with no queue (`GET /api/v3/ratelimit`). The
+  server paces itself to 45 per 180 s (`DEALPOS_RATE_PERMITS`, `DEALPOS_RATE_WINDOW`; set
+  permits to `0` to turn it off), so a heavy read can pause until the window clears instead
+  of failing. A call that looks hung is usually waiting for that.
+- `get_sales_summary` spends at most 30 requests on one range. A full year took 23 live; if a
+  range needs more, the result carries `truncated` and a warning, so ask for a shorter range.
+- `get_inventory_log` takes one variant code (required); there is no all-variants log.
+- `list_customers` filters by name on the server; email and phone are matched by the tool
+  after fetching, because DealPOS ignores those two filters.
 - Environment variables always win over a `.env` file.
 
 ## Development
@@ -112,8 +117,8 @@ uv run pytest -q
 All HTTP in the suite is mocked, so tests need no credentials or network.
 `tests/test_contract_live.py` is the only file that talks to DealPOS (read-only GETs). It is
 skipped by default; run it on its own with `DEALPOS_LIVE_CONTRACT=1 uv run pytest tests/test_contract_live.py -v`.
-The whole file makes more than 50 requests, so it can outlast one rate-limit window; run it
-in parts (`-k every_read_tool` is the quick smoke test) and wait three minutes between runs.
+The whole file makes more than 50 requests; its tests share one rate limiter, so a full run
+pauses for the window and takes about six minutes. `-k every_read_tool` is the quick smoke test.
 
 To run from a local checkout instead of GitHub, point your client at
 `uv run --directory /path/to/dealpos-mcp dealpos-mcp`; the server reads `.env` from the

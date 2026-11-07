@@ -24,6 +24,9 @@ auth if the whole suite runs together:
 
     DEALPOS_LIVE_CONTRACT=1 uv run pytest tests/test_contract_live.py -v
 
+The API allows 50 requests per 180 s. The client limiter (45 per 180 s) is pooled across
+this file's tests, so a full run may pause for the window; it takes about six minutes.
+
 Read-only: GET only, no POST/PUT/DELETE. Safe against production.
 """
 import os
@@ -41,11 +44,20 @@ pytestmark = pytest.mark.skipif(
 WINDOW = ("2026-06-01", "2026-06-30")  # a month known to contain sales
 
 
+_shared_limiter = None  # the API's 50 requests / 180 s is per credential, not per client
+
+
 @pytest.fixture
 async def live():
     # read_only=True is forced (init kwargs beat env/.env), so this file can never write
     # even if DEALPOS_READ_ONLY=false is set for real use.
+    global _shared_limiter
     c = DealPOSClient(Settings(read_only=True))
+    # Every test builds its own client; pool one limiter across them so the whole file
+    # paces itself under the API limit instead of tripping 429s partway through.
+    if _shared_limiter is None:
+        _shared_limiter = c._limiter
+    c._limiter = _shared_limiter
     try:
         yield c
     finally:

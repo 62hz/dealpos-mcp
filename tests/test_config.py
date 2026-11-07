@@ -25,3 +25,12 @@ def test_settings_missing_credentials_raises(monkeypatch):
     monkeypatch.setenv("DEALPOS_CLIENT_SECRET", "secret")
     with pytest.raises(Exception):
         Settings(_env_file=None)  # skip .env so monkeypatch deletion is effective
+
+
+def test_rate_limit_defaults_sit_under_the_api_limit_and_are_overridable(monkeypatch):
+    s = Settings(client_id="cid", client_secret="sec", _env_file=None)
+    assert (s.rate_permits, s.rate_window) == (45, 180.0)  # API allows 50 per 180 s
+    monkeypatch.setenv("DEALPOS_RATE_PERMITS", "10")
+    monkeypatch.setenv("DEALPOS_RATE_WINDOW", "60")
+    s = Settings(client_id="cid", client_secret="sec", _env_file=None)
+    assert (s.rate_permits, s.rate_window) == (10, 60.0)

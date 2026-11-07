@@ -365,6 +365,48 @@ async def test_get_writeoffs_date_params(client):
     assert p["From"] == "2026-06-01" and p["To"] == "2026-06-30"
 
 
+# --- get_sales_summary: 100-row cap splitting and the request budget ---
+
+def _product_sold_route(rows_for):
+    """ProductSold mock: rows_for(day_count) -> the rows the API would return."""
+    from datetime import date
+
+    def handler(req):
+        p = req.url.params
+        days = (date.fromisoformat(p["To"]) - date.fromisoformat(p["From"])).days + 1
+        return httpx.Response(200, json=rows_for(days))
+    return respx.get(f"{BASE}/api/v3/Report/ProductSold").mock(side_effect=handler)
+
+
+def _sold(n, qty=1):
+    return [{"Code": f"C{i}", "Name": f"N{i}", "Quantity": qty, "Sales": 10 * qty,
+             "Cost": 5 * qty, "Profit": 5 * qty} for i in range(n)]
+
+
+@respx.mock
+async def test_sales_summary_splits_a_capped_range_and_merges_by_code(client):
+    _token()
+    # Any multi-day range hits the 100-row cap; a single day has just 2 products.
+    route = _product_sold_route(lambda days: _sold(100) if days > 1 else _sold(2))
+    out = await tools.get_sales_summary(client, "2026-06-01", "2026-06-04")
+    assert "truncated" not in out
+    assert route.call_count == 7             # 1 + 2 + 4: whole range, halves, single days
+    by_code = {r["Code"]: r["Quantity"] for r in out["items"]}
+    assert by_code == {"C0": 4, "C1": 4}     # four days merged per code
+
+
+@respx.mock
+async def test_sales_summary_stops_at_the_request_budget_and_says_so(client, monkeypatch):
+    """The API allows 50 requests / 180 s; a wide capped range must not fan out past it."""
+    monkeypatch.setattr(tools, "_PRODUCT_SOLD_MAX_REQUESTS", 5)
+    _token()
+    route = _product_sold_route(lambda days: _sold(100))   # every range stays capped
+    out = await tools.get_sales_summary(client, "2026-01-01", "2026-12-31")
+    assert route.call_count <= 5
+    assert out["truncated"] is True and "INCOMPLETE" in out["warning"]
+    assert out["items"]                      # rows fetched before the budget ran out are kept
+
+
 # --- list_invoices ---
 
 def _outlets():

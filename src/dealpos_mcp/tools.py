@@ -13,19 +13,30 @@ def _num(v) -> float:
 # --- sales reports ---
 
 _PRODUCT_SOLD_CAP = 100  # Report/ProductSold returns at most 100 rows and ignores paging
+_PRODUCT_SOLD_MAX_REQUESTS = 30  # one summary may spend this many of the API's 45 per 180 s
 
 
 async def _product_sold_chunked(client: DealPOSClient, date_from: str, date_to: str,
-                                outlet: str | None, _depth: int = 0) -> tuple[list[dict], bool]:
+                                outlet: str | None, _depth: int = 0,
+                                _left: list[int] | None = None) -> tuple[list[dict], bool]:
     """Fetch Report/ProductSold, splitting the date range around the 100-row cap.
 
     The endpoint silently truncates at 100 rows and IGNORES PageNumber/PageSize
     (verified 2026-08-02: PageSize=500 and page=2/3 all return the identical
     first 100 rows). Splitting the date range is the only way to see everything.
 
-    Returns (rows, truncated). `truncated` is True only if a single day still
-    hits the cap, which no split can fix.
+    Splitting fans out, and the API allows only 50 requests per 180 s, so the whole
+    recursion shares a request budget (`_left`, a one-item list). When it runs out the
+    rows fetched so far are kept and the result is flagged truncated.
+
+    Returns (rows, truncated). `truncated` is True if a single day still hits the cap
+    (no split can fix that) or the request budget ran out.
     """
+    if _left is None:
+        _left = [_PRODUCT_SOLD_MAX_REQUESTS]
+    if _left[0] <= 0:
+        return [], True
+    _left[0] -= 1
 
     params: dict = {"From": date_from, "To": date_to}
     if outlet:
@@ -44,12 +55,14 @@ async def _product_sold_chunked(client: DealPOSClient, date_from: str, date_to: 
     if d0 >= d1 or _depth >= 12:
         # A single day at the cap cannot be split further.
         return rows, True
+    if _left[0] < 2:
+        return rows, True  # cannot afford both halves; keep the capped rows, flagged
 
     mid = d0 + (d1 - d0) // 2
     left, t_l = await _product_sold_chunked(client, d0.isoformat(), mid.isoformat(),
-                                            outlet, _depth + 1)
+                                            outlet, _depth + 1, _left)
     right, t_r = await _product_sold_chunked(client, (mid + timedelta(days=1)).isoformat(),
-                                             d1.isoformat(), outlet, _depth + 1)
+                                             d1.isoformat(), outlet, _depth + 1, _left)
 
     merged: dict[str, dict] = {}
     for r in left + right:
@@ -85,8 +98,9 @@ async def get_sales_summary(client: DealPOSClient, date_from: str, date_to: str,
            "total_profit": total_profit, "top_item": top, "items": rows}
     if truncated:
         out["truncated"] = True
-        out["warning"] = ("A single day hit the 100-row cap, so these totals are "
-                          "INCOMPLETE and under-report actual sales.")
+        out["warning"] = ("A single day hit the 100-row cap, or the range needed more than "
+                          f"{_PRODUCT_SOLD_MAX_REQUESTS} API requests, so these totals are "
+                          "INCOMPLETE and under-report actual sales. Try a shorter date range.")
     return out
 
 

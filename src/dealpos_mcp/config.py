@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     low_stock_fallback: int = 5
     # Safe by default: write tools refuse to run until DEALPOS_READ_ONLY=false.
     read_only: bool = True
+    # DealPOS allows 50 requests per 180 s with no queue (GET /api/v3/ratelimit). Stay
+    # under it with a small margin; set DEALPOS_RATE_PERMITS=0 to switch the limiter off.
+    rate_permits: int = 45
+    rate_window: float = 180.0
 
     @property
     def base_url(self) -> str:

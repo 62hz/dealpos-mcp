@@ -89,3 +89,51 @@ async def test_request_maps_400_message_to_friendly_error(client):
     with pytest.raises(DealPOSError) as e:
         await client.request("GET", "/api/v3/Inventory", params={"PageNumber": 1, "PageSize": 9999})
     assert "PageSize" in str(e.value)
+
+
+# --- rate limiter (DealPOS allows 50 requests / 180 s with no queue) ---
+
+def _fake_time():
+    """A clock plus a sleep that advances it, so limiter tests take no real time."""
+    t = [0.0]
+    sleeps: list[float] = []
+
+    async def sleep(s):
+        sleeps.append(s)
+        t[0] += s
+
+    return (lambda: t[0]), sleep, sleeps
+
+
+async def test_limiter_makes_the_extra_caller_wait_for_the_window():
+    from dealpos_mcp.client import _SlidingWindow
+    clock, sleep, sleeps = _fake_time()
+    w = _SlidingWindow(2, 10, clock, sleep)
+    for _ in range(3):
+        await w.acquire()
+    assert sleeps == [10.0]       # third call waited until the first two aged out
+    await w.acquire()             # window slid: a free slot again, no more waiting
+    assert sleeps == [10.0]
+
+
+async def test_limiter_zero_permits_switches_it_off():
+    from dealpos_mcp.client import _SlidingWindow
+    clock, sleep, sleeps = _fake_time()
+    w = _SlidingWindow(0, 10, clock, sleep)
+    for _ in range(100):
+        await w.acquire()
+    assert sleeps == []
+
+
+@respx.mock
+async def test_client_counts_the_token_call_and_throttles_requests(client):
+    from dealpos_mcp.client import _SlidingWindow
+    _mock_token()
+    respx.get("https://doubledeer.dealpos.co.id/api/v3/Outlet").mock(
+        return_value=httpx.Response(200, json=[]))
+    clock, sleep, sleeps = _fake_time()
+    client._limiter = _SlidingWindow(2, 10, clock, sleep)
+    await client.request("GET", "/api/v3/Outlet")   # token + request = both permits
+    assert sleeps == []
+    await client.request("GET", "/api/v3/Outlet")   # token cached, but no permit left
+    assert sleeps == [10.0]

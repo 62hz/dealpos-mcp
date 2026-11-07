@@ -1,4 +1,5 @@
 import asyncio
+import collections
 import time
 
 import httpx
@@ -16,16 +17,41 @@ class DealPOSError(Exception):
 _READ_ONLY_POSTS = {"/api/v3/Report/DailySales", "/api/v3/Inventory/CodeArray"}
 
 
+class _SlidingWindow:
+    """At most `permits` acquisitions in any `window` seconds; extra callers wait their turn."""
+
+    def __init__(self, permits: int, window: float, clock=time.monotonic, sleep=asyncio.sleep):
+        self.permits, self.window = permits, window
+        self._clock, self._sleep = clock, sleep
+        self._stamps: collections.deque[float] = collections.deque()
+        self._lock = asyncio.Lock()
+
+    async def acquire(self) -> None:
+        if self.permits <= 0:  # limiter switched off
+            return
+        async with self._lock:
+            while True:
+                now = self._clock()
+                while self._stamps and now - self._stamps[0] >= self.window:
+                    self._stamps.popleft()
+                if len(self._stamps) < self.permits:
+                    self._stamps.append(now)
+                    return
+                await self._sleep(self._stamps[0] + self.window - now)
+
+
 class DealPOSClient:
     def __init__(self, settings: Settings):
         self.s = settings
         self._token: str | None = None
         self._token_expiry: float = 0.0
         self._http = httpx.AsyncClient(base_url=settings.base_url, timeout=30.0)
+        self._limiter = _SlidingWindow(settings.rate_permits, settings.rate_window)
 
     async def _get_token(self) -> str:
         if self._token and time.time() < self._token_expiry - 60:
             return self._token
+        await self._limiter.acquire()  # the token call counts against the API limit too
         r = await self._http.post("/api/v3/Token/OAuth2", json={
             "client_id": self.s.client_id, "client_secret": self.s.client_secret})
         if r.status_code != 200:
@@ -43,6 +69,7 @@ class DealPOSClient:
                 "Set DEALPOS_READ_ONLY=false to enable write tools.")
         for attempt in range(_max_retries + 1):
             token = await self._get_token()
+            await self._limiter.acquire()
             r = await self._http.request(method, path, params=params, json=json,
                                          headers={"Authorization": f"Bearer {token}"})
             if r.status_code == 429 and attempt < _max_retries:
