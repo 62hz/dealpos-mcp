@@ -34,3 +34,12 @@ def test_rate_limit_defaults_sit_under_the_api_limit_and_are_overridable(monkeyp
     monkeypatch.setenv("DEALPOS_RATE_WINDOW", "60")
     s = Settings(client_id="cid", client_secret="sec", _env_file=None)
     assert (s.rate_permits, s.rate_window) == (10, 60.0)
+
+
+def test_env_read_only_true_beats_dotenv_false(monkeypatch, tmp_path):
+    # MF agents run dealpos-mcp with DEALPOS_READ_ONLY=true while Django's .env says false.
+    env = tmp_path / ".env"
+    env.write_text("DEALPOS_READ_ONLY=false\nDEALPOS_CLIENT_ID=cid\nDEALPOS_CLIENT_SECRET=sec\n")
+    monkeypatch.setenv("DEALPOS_READ_ONLY", "true")
+    s = Settings(_env_file=str(env))
+    assert s.read_only is True
