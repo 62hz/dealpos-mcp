@@ -709,10 +709,10 @@ async def update_product(client: DealPOSClient, code: str, fields: dict) -> dict
 async def get_inventory_by_codes(client: DealPOSClient, codes: list[str],
                                   outlet: str | None = None) -> list[dict]:
     """Batch stock lookup for multiple product codes in a single API call."""
-    body: dict = {"Code": codes}
-    if outlet:
-        body["Outlet"] = outlet
-    rows = await client.request("POST", "/api/v3/Inventory/CodeArray", json=body)
+    # Outlet in the body breaks the call (400/500); it must go in the query string.
+    params = {"Outlet": outlet} if outlet else None
+    rows = await client.request("POST", "/api/v3/Inventory/CodeArray",
+                                params=params, json={"Code": list(codes)})
     return rows if isinstance(rows, list) else []
 
 

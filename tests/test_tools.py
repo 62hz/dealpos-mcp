@@ -612,8 +612,9 @@ async def test_get_inventory_by_codes_outlet(client):
     route = respx.post(f"{BASE}/api/v3/Inventory/CodeArray").mock(
         return_value=httpx.Response(200, json=[]))
     await tools.get_inventory_by_codes(client, ["X"], outlet="MF01")
-    body = _json.loads(route.calls[0].request.content)
-    assert body["Outlet"] == "MF01"
+    req = route.calls[0].request
+    assert _json.loads(req.content) == {"Code": ["X"]}   # no Outlet in the body
+    assert req.url.params["Outlet"] == "MF01"
 
 
 # --- get_inventory_log ---
