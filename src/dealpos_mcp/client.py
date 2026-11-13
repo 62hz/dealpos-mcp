@@ -54,6 +54,12 @@ class DealPOSClient:
         await self._limiter.acquire()  # the token call counts against the API limit too
         r = await self._http.post("/api/v3/Token/OAuth2", json={
             "client_id": self.s.client_id, "client_secret": self.s.client_secret})
+        if r.status_code == 429:
+            raise DealPOSError("DealPOS rate limit hit on the token call (50 requests per "
+                               "180 s, shared by every app on this account). Wait ~3 minutes.")
+        if r.status_code >= 500:
+            raise DealPOSError(f"DealPOS is unavailable (HTTP {r.status_code} on the token "
+                               "call). Not a credentials problem; retry later.")
         if r.status_code != 200:
             raise DealPOSError("DealPOS auth failed — check DEALPOS_CLIENT_ID / SECRET.")
         data = r.json()

@@ -137,3 +137,15 @@ async def test_client_counts_the_token_call_and_throttles_requests(client):
     assert sleeps == []
     await client.request("GET", "/api/v3/Outlet")   # token cached, but no permit left
     assert sleeps == [10.0]
+
+
+TOKEN_URL = "https://doubledeer.dealpos.co.id/api/v3/Token/OAuth2"
+
+
+@pytest.mark.parametrize("status, needle", [
+    (429, "rate limit"), (503, "unavailable"), (401, "check DEALPOS_CLIENT_ID")])
+@respx.mock
+async def test_token_error_names_its_cause(client, status, needle):
+    respx.post(TOKEN_URL).mock(return_value=httpx.Response(status, json={}))
+    with pytest.raises(DealPOSError, match=needle):
+        await client._get_token()
