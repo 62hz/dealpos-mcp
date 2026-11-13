@@ -451,8 +451,13 @@ async def create_customer(client: DealPOSClient, name: str, email: str = "",
         code = nc.get("Code") if isinstance(nc, dict) else str(nc or "")
         if not code:
             raise DealPOSError("DealPOS returned no customer code. Pass code= explicitly.")
-    body = {"ID": "", "Code": code, "Email": email, "MobilePhone": mobile_phone,
-            "Name": name, "Status": "Active"}
+    # Spec CreateCustomer: no ID (DealPOS assigns it; "" fails Guid parsing, live
+    # 2026-11-13), phone key is Mobile. Empty optional fields are left out.
+    body = {"Code": code, "Name": name, "Status": "Active"}
+    if email:
+        body["Email"] = email
+    if mobile_phone:
+        body["Mobile"] = mobile_phone
     return await client.request("POST", "/api/v3/Customer", json=body)
 
 

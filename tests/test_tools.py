@@ -162,8 +162,9 @@ async def test_create_customer_fetches_newcode_when_missing(client):
     out = await tools.create_customer(client, name="Rian", email="rian@example.com",
                                       mobile_phone="08123456789")
     assert out["Code"] == "CUST-009"
-    body = route.calls[0].request.content.decode()
-    assert "CUST-009" in body and "Active" in body
+    body = _json.loads(route.calls[0].request.content)
+    assert body == {"Code": "CUST-009", "Name": "Rian", "Status": "Active",
+                    "Email": "rian@example.com", "Mobile": "08123456789"}
 
 
 # ═══════════════════════════════════════════════════════
@@ -654,7 +655,9 @@ async def test_create_customer_with_code_skips_newcode(client):
     await tools.create_customer(client, name="USS JCC", code="USS-JCC")
     assert not newcode.called
     body = _json.loads(route.calls[0].request.content)
-    assert body["Code"] == "USS-JCC" and body["Email"] == "" and body["MobilePhone"] == ""
+    # Live 2026-11-13: "ID": "" -> 400 "could not be converted to System.Guid". The spec's
+    # CreateCustomer body has no ID, and the phone key is Mobile. Empty fields are left out.
+    assert body == {"Code": "USS-JCC", "Name": "USS JCC", "Status": "Active"}
 
 
 @respx.mock
