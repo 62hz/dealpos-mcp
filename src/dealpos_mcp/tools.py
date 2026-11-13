@@ -66,8 +66,7 @@ async def _product_sold_chunked(client: DealPOSClient, date_from: str, date_to: 
     params: dict = {"From": date_from, "To": date_to}
     if outlet:
         params["Outlet"] = outlet
-    rows = await client.request("GET", "/api/v3/Report/ProductSold", params=params)
-    rows = rows if isinstance(rows, list) else []
+    rows = _rows(await client.request("GET", "/api/v3/Report/ProductSold", params=params))
 
     if len(rows) < _PRODUCT_SOLD_CAP:
         return rows, False
@@ -281,11 +280,7 @@ async def create_composite_variant(client: DealPOSClient, product_code: str,
     """
     if not components:
         raise DealPOSError("A composite variant needs at least one component.")
-    if not (outlet or client.s.default_outlet):
-        raise DealPOSError(
-            "Composite variants require an outlet (the API's OutletPrice field is "
-            "required) and DEALPOS_DEFAULT_OUTLET is unset in .env."
-        )
+    _outlet(client, outlet, "A composite variant (OutletPrice)")
     await client.request("POST", "/api/v3/Variant/Add", json={
         "Code": product_code,
         "Variants": [{"Model": model, "Code": variant_code,
@@ -307,12 +302,7 @@ async def set_variant_composite(client: DealPOSClient, variant_code: str, price:
     """
     if not components:
         raise DealPOSError("A composite variant needs at least one component.")
-    outlet = outlet or client.s.default_outlet
-    if not outlet:
-        raise DealPOSError(
-            "Composite variants require an outlet (the API's OutletPrice field is "
-            "required) and DEALPOS_DEFAULT_OUTLET is unset in .env."
-        )
+    outlet = _outlet(client, outlet, "A composite variant (OutletPrice)")
     return await client.request("PUT", "/api/v3/Variant", json={
         "Code": variant_code,
         "Type": "Composite",
@@ -486,18 +476,8 @@ async def list_customers(client: DealPOSClient, name: str | None = None,
     So email (substring, case-insensitive) and phone (digits substring of Mobile) are
     applied here, after the pages are fetched.
     """
-    page_size = min(page_size, 500)
-    params: dict = {"PageSize": page_size}
-    if name:
-        params["Name"] = name
-    rows: list[dict] = []
-    for page in range(1, 21):  # hard cap: never loop forever if paging is ignored
-        batch = await client.request("GET", "/api/v3/Customer",
-                                     params={**params, "PageNumber": page})
-        batch = batch if isinstance(batch, list) else []
-        rows.extend(batch)
-        if len(batch) < page_size:
-            break
+    rows, _ = await _paged(client, "/api/v3/Customer", {"Name": name} if name else {},
+                           min(page_size, 500))
     if email:
         rows = [r for r in rows if email.lower() in str(r.get("Email") or "").lower()]
     if phone:
@@ -512,8 +492,7 @@ async def list_customers(client: DealPOSClient, name: str | None = None,
 
 async def list_categories(client: DealPOSClient) -> list[dict]:
     """List all product categories."""
-    rows = await client.request("GET", "/api/v3/Category")
-    return rows if isinstance(rows, list) else []
+    return _rows(await client.request("GET", "/api/v3/Category"))
 
 
 async def list_outlets(client: DealPOSClient, include_suspended: bool = False) -> list[dict]:
@@ -521,8 +500,7 @@ async def list_outlets(client: DealPOSClient, include_suspended: bool = False) -
     # /api/v3/Outlet rejects a bare GET with 400 "Suspended value is not a valid
     # Boolean" — the param is required and must be the string "true"/"false".
     params = {"Suspended": "true" if include_suspended else "false"}
-    rows = await client.request("GET", "/api/v3/Outlet", params=params)
-    return rows if isinstance(rows, list) else []
+    return _rows(await client.request("GET", "/api/v3/Outlet", params=params))
 
 
 async def _resolve_outlet_id(client: DealPOSClient, outlet: str | None) -> str:
@@ -546,15 +524,7 @@ async def list_suppliers(client: DealPOSClient, page_size: int = 100) -> list[di
     without them the API 500s with "The offset specified in a OFFSET clause may not be
     negative". Found 2026-11-08 by the live read-tool smoke test.
     """
-    all_rows: list[dict] = []
-    for page in range(1, 101):  # hard cap: never loop forever if paging is ignored
-        rows = await client.request("GET", "/api/v3/Supplier",
-                                    params={"PageNumber": page, "PageSize": page_size})
-        rows = rows if isinstance(rows, list) else []
-        all_rows.extend(rows)
-        if len(rows) < page_size:
-            break
-    return all_rows
+    return (await _paged(client, "/api/v3/Supplier", {}, page_size, max_pages=100))[0]
 
 
 # --- financial reports ---
@@ -569,8 +539,7 @@ async def get_writeoffs(client: DealPOSClient, date_from: str, date_to: str,
     # /WriteOff returns write-off TYPES ("Bad Debt", "Biaya Admin Tiktok"),
     # not transactions. Verified 2026-08-02: rows carry Number, Outlet,
     # Customer, Created, Amount, Tag — and From/To filter correctly.
-    rows = await client.request("GET", "/api/v3/WriteOff/Invoice", params=params)
-    rows = rows if isinstance(rows, list) else []
+    rows = _rows(await client.request("GET", "/api/v3/WriteOff/Invoice", params=params))
     total = sum(_num(r.get("Total") or r.get("Amount") or 0) for r in rows)
     return {
         "date_from": date_from, "date_to": date_to,
@@ -706,9 +675,8 @@ async def get_inventory_by_codes(client: DealPOSClient, codes: list[str],
     """Batch stock lookup for multiple product codes in a single API call."""
     # Outlet in the body breaks the call (400/500); it must go in the query string.
     params = {"Outlet": outlet} if outlet else None
-    rows = await client.request("POST", "/api/v3/Inventory/CodeArray",
-                                params=params, json={"Code": list(codes)})
-    return rows if isinstance(rows, list) else []
+    return _rows(await client.request("POST", "/api/v3/Inventory/CodeArray",
+                                      params=params, json={"Code": list(codes)}))
 
 
 async def get_inventory_log(client: DealPOSClient, code: str,
@@ -730,8 +698,7 @@ async def get_inventory_log(client: DealPOSClient, code: str,
         params["From"] = date_from
     if date_to:
         params["To"] = date_to
-    rows = await client.request("GET", "/api/v3/Inventory/Log", params=params)
-    return rows if isinstance(rows, list) else []
+    return _rows(await client.request("GET", "/api/v3/Inventory/Log", params=params))
 
 
 # --- stock adjustment reads ---
@@ -751,21 +718,9 @@ async def list_adjustments(client: DealPOSClient, date_from: str | None = None,
     `adjustment_type` is Adjust (a quantity delta, e.g. web checkout) or Count (stock take).
     If max_pages stops it early, `truncated` and `warning` are set.
     """
-    params: dict = {"PageSize": page_size}
-    for key, val in (("From", date_from), ("To", date_to), ("Outlet", outlet),
-                     ("State", state), ("Type", adjustment_type)):
-        if val:
-            params[key] = val
-    rows: list[dict] = []
-    truncated = True
-    for page in range(1, max_pages + 1):
-        batch = await client.request("GET", "/api/v3/Adjustment",
-                                     params={**params, "PageNumber": page})
-        batch = batch if isinstance(batch, list) else []
-        rows.extend(batch)
-        if len(batch) < page_size:
-            truncated = False
-            break
+    params = {k: v for k, v in (("From", date_from), ("To", date_to), ("Outlet", outlet),
+                                ("State", state), ("Type", adjustment_type)) if v}
+    rows, truncated = await _paged(client, "/api/v3/Adjustment", params, page_size, max_pages)
     out: dict = {"count": len(rows), "adjustments": rows}
     if truncated:
         out["truncated"] = True
@@ -841,13 +796,8 @@ async def adjust_stock(client: DealPOSClient, items: list[dict],
     never collide.
     """
     _check_adjust_items(items)
-    if not client.s.default_outlet:
-        raise DealPOSError(
-            "Adjustment requires an outlet and DEALPOS_DEFAULT_OUTLET is unset "
-            "in .env — the API rejects the adjustment without one."
-        )
     body: dict = {
-        "Outlet": client.s.default_outlet,
+        "Outlet": _outlet(client, None, "A stock adjustment"),
         "Date": date.today().strftime("%Y/%m/%d"),
         "Number": reference or f"ADJ-{datetime.now():%Y%m%d-%H%M%S}-{secrets.token_hex(2)}",
         "Variants": [
