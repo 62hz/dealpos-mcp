@@ -77,7 +77,7 @@ async def upsert_pricebook(name: str, variants: list[dict], minimum_quantity: in
                            description: str | None = None) -> dict:
     """Create or update a pricebook by exact name. variants: [{code, original_price, price}]
     — MUST be a JSON array of objects, never a comma-separated string. outlets, if given,
-    MUST also be a JSON array of outlet names, e.g. ["MF Store"], never a comma-separated string.
+    MUST also be a JSON array of outlet names, e.g. ["Main Store"], never a comma-separated string.
     minimum_quantity defaults to 0, which keeps the pricebook inert at the POS counter —
     required when the pricebook is a marketplace channel's price source, so the online price
     cannot leak into in-store sales. Only raise it for a real wholesale/qty promotion.

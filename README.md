@@ -1,8 +1,10 @@
 # DealPOS MCP
 
 Local [MCP](https://modelcontextprotocol.io) server that lets Claude read (and, if you
-allow it, write) DealPOS data for Medium Format. Runs on your machine over stdio; there
-is no hosted service.
+allow it, write) DealPOS data. Runs on your machine over stdio; there is no hosted service.
+Not on the built-in default tenant? Set `DEALPOS_SUBDOMAIN` to your own host
+(`yourshop.dealpos.co.id`), for example with `--env DEALPOS_SUBDOMAIN=...` on the install
+command below.
 
 **Unofficial.** This is an independent project. It is not made, endorsed or supported by
 DealPOS (PT Generasi Inspirasi Informatika), which publishes its own MCP server at
@@ -18,7 +20,7 @@ the one that is not). The 10 write tools are blocked until you set `DEALPOS_READ
 You need three things:
 
 1. [`uv`](https://docs.astral.sh/uv/getting-started/installation/) installed.
-2. Access to this private repo (`gh auth login`, or any git credential that can clone it).
+2. `git` installed (`uvx` clones this public repo; no GitHub login needed).
 3. Your own DealPOS **Client ID** and **Client Secret** (DealPOS → Setup/Settings →
    OAuth2). Ask the DealPOS admin for a pair; do not share one between people, so DealPOS
    can tell who did what and one person can be revoked on their own.

@@ -7,7 +7,7 @@ from dealpos_mcp.client import DealPOSError
 
 @respx.mock
 async def test_get_token_caches_until_expiry(client):
-    route = respx.post("https://doubledeer.dealpos.co.id/api/v3/Token/OAuth2").mock(
+    route = respx.post("https://example.dealpos.co.id/api/v3/Token/OAuth2").mock(
         return_value=httpx.Response(200, json={
             "token_type": "Bearer", "access_token": "tok-123", "expires_in": 172800,
             "expiredAt": "2026-07-02T00:00:00Z"})
@@ -20,14 +20,14 @@ async def test_get_token_caches_until_expiry(client):
 
 
 def _mock_token():
-    respx.post("https://doubledeer.dealpos.co.id/api/v3/Token/OAuth2").mock(
+    respx.post("https://example.dealpos.co.id/api/v3/Token/OAuth2").mock(
         return_value=httpx.Response(200, json={"access_token": "tok", "expires_in": 1000}))
 
 
 @respx.mock
 async def test_request_injects_bearer_and_returns_json(client):
     _mock_token()
-    route = respx.get("https://doubledeer.dealpos.co.id/api/v3/Inventory").mock(
+    route = respx.get("https://example.dealpos.co.id/api/v3/Inventory").mock(
         return_value=httpx.Response(200, json=[{"Code": "A1"}]))
     out = await client.request("GET", "/api/v3/Inventory", params={"PageNumber": 1, "PageSize": 10})
     assert out == [{"Code": "A1"}]
@@ -53,11 +53,11 @@ async def test_read_only_blocks_writes_before_any_network_call(method):
 async def test_read_only_allows_get_and_read_via_post():
     c = _read_only_client()
     _mock_token()
-    respx.get("https://doubledeer.dealpos.co.id/api/v3/Outlet").mock(
-        return_value=httpx.Response(200, json=[{"Name": "MF Store"}]))
-    respx.post("https://doubledeer.dealpos.co.id/api/v3/Inventory/CodeArray").mock(
+    respx.get("https://example.dealpos.co.id/api/v3/Outlet").mock(
+        return_value=httpx.Response(200, json=[{"Name": "Main Store"}]))
+    respx.post("https://example.dealpos.co.id/api/v3/Inventory/CodeArray").mock(
         return_value=httpx.Response(200, json=[{"Code": "A1"}]))
-    assert await c.request("GET", "/api/v3/Outlet") == [{"Name": "MF Store"}]
+    assert await c.request("GET", "/api/v3/Outlet") == [{"Name": "Main Store"}]
     assert await c.request("POST", "/api/v3/Inventory/CodeArray", json={"Codes": ["A1"]}) \
         == [{"Code": "A1"}]
 
@@ -65,7 +65,7 @@ async def test_read_only_allows_get_and_read_via_post():
 @respx.mock
 async def test_writes_pass_when_read_only_off(client):
     _mock_token()
-    respx.put("https://doubledeer.dealpos.co.id/api/v3/Product").mock(
+    respx.put("https://example.dealpos.co.id/api/v3/Product").mock(
         return_value=httpx.Response(200, json={"ok": True}))
     assert await client.request("PUT", "/api/v3/Product", json={}) == {"ok": True}
 
@@ -73,7 +73,7 @@ async def test_writes_pass_when_read_only_off(client):
 @respx.mock
 async def test_request_retries_on_429_then_succeeds(client):
     _mock_token()
-    route = respx.get("https://doubledeer.dealpos.co.id/api/v3/Product").mock(
+    route = respx.get("https://example.dealpos.co.id/api/v3/Product").mock(
         side_effect=[httpx.Response(429, headers={"Retry-After": "0"}),
                      httpx.Response(200, json={"ok": True})])
     out = await client.request("GET", "/api/v3/Product", params={"PageNumber": 1, "PageSize": 1})
@@ -84,7 +84,7 @@ async def test_request_retries_on_429_then_succeeds(client):
 @respx.mock
 async def test_request_maps_400_message_to_friendly_error(client):
     _mock_token()
-    respx.get("https://doubledeer.dealpos.co.id/api/v3/Inventory").mock(
+    respx.get("https://example.dealpos.co.id/api/v3/Inventory").mock(
         return_value=httpx.Response(400, json={"Message": "PageSize must not exceed max allowed more than 500"}))
     with pytest.raises(DealPOSError) as e:
         await client.request("GET", "/api/v3/Inventory", params={"PageNumber": 1, "PageSize": 9999})
@@ -129,7 +129,7 @@ async def test_limiter_zero_permits_switches_it_off():
 async def test_client_counts_the_token_call_and_throttles_requests(client):
     from dealpos_mcp.client import _SlidingWindow
     _mock_token()
-    respx.get("https://doubledeer.dealpos.co.id/api/v3/Outlet").mock(
+    respx.get("https://example.dealpos.co.id/api/v3/Outlet").mock(
         return_value=httpx.Response(200, json=[]))
     clock, sleep, sleeps = _fake_time()
     client._limiter = _SlidingWindow(2, 10, clock, sleep)
@@ -139,7 +139,7 @@ async def test_client_counts_the_token_call_and_throttles_requests(client):
     assert sleeps == [10.0]
 
 
-TOKEN_URL = "https://doubledeer.dealpos.co.id/api/v3/Token/OAuth2"
+TOKEN_URL = "https://example.dealpos.co.id/api/v3/Token/OAuth2"
 
 
 @pytest.mark.parametrize("status, needle", [
@@ -154,7 +154,7 @@ async def test_token_error_names_its_cause(client, status, needle):
 @respx.mock
 async def test_post_transport_error_says_the_write_may_have_landed(client):
     _mock_token()
-    respx.post("https://doubledeer.dealpos.co.id/api/v3/Adjustment").mock(
+    respx.post("https://example.dealpos.co.id/api/v3/Adjustment").mock(
         side_effect=httpx.ReadTimeout("slow"))
     with pytest.raises(DealPOSError, match="may or may not"):
         await client.request("POST", "/api/v3/Adjustment", json={})
@@ -163,7 +163,7 @@ async def test_post_transport_error_says_the_write_may_have_landed(client):
 @respx.mock
 async def test_get_transport_error_is_a_friendly_retry(client):
     _mock_token()
-    respx.get("https://doubledeer.dealpos.co.id/api/v3/Outlet").mock(
+    respx.get("https://example.dealpos.co.id/api/v3/Outlet").mock(
         side_effect=httpx.ConnectError("down"))
     with pytest.raises(DealPOSError, match="retry") as e:
         await client.request("GET", "/api/v3/Outlet")
@@ -173,7 +173,7 @@ async def test_get_transport_error_is_a_friendly_retry(client):
 @respx.mock
 async def test_non_json_success_body_is_returned_as_text(client):
     _mock_token()
-    respx.post("https://doubledeer.dealpos.co.id/api/v3/Product").mock(
+    respx.post("https://example.dealpos.co.id/api/v3/Product").mock(
         return_value=httpx.Response(200, text="Success"))
     assert await client.request("POST", "/api/v3/Product", json={}) == "Success"
 
@@ -181,9 +181,9 @@ async def test_non_json_success_body_is_returned_as_text(client):
 @respx.mock
 async def test_every_call_identifies_the_app_in_user_agent(client):
     """DealPOS will reject calls without an identifying User-Agent from 2027."""
-    token = respx.post("https://doubledeer.dealpos.co.id/api/v3/Token/OAuth2").mock(
+    token = respx.post("https://example.dealpos.co.id/api/v3/Token/OAuth2").mock(
         return_value=httpx.Response(200, json={"access_token": "tok", "expires_in": 1000}))
-    api = respx.get("https://doubledeer.dealpos.co.id/api/v3/Inventory").mock(
+    api = respx.get("https://example.dealpos.co.id/api/v3/Inventory").mock(
         return_value=httpx.Response(200, json=[]))
     await client.request("GET", "/api/v3/Inventory")
     for route in (token, api):

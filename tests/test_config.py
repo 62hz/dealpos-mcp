@@ -3,11 +3,11 @@ from dealpos_mcp.config import Settings
 
 
 def test_settings_build_base_url_and_defaults(monkeypatch):
-    monkeypatch.setenv("DEALPOS_SUBDOMAIN", "doubledeer.dealpos.co.id")
+    monkeypatch.setenv("DEALPOS_SUBDOMAIN", "example.dealpos.co.id")
     monkeypatch.setenv("DEALPOS_CLIENT_ID", "cid")
     monkeypatch.setenv("DEALPOS_CLIENT_SECRET", "secret")
     s = Settings()
-    assert s.base_url == "https://doubledeer.dealpos.co.id"
+    assert s.base_url == "https://example.dealpos.co.id"
     assert s.low_stock_fallback == 5  # default
 
 
@@ -16,7 +16,7 @@ def test_settings_defaults_are_safe_and_instant(monkeypatch):
     monkeypatch.delenv("DEALPOS_SUBDOMAIN", raising=False)
     s = Settings(client_id="cid", client_secret="secret", _env_file=None)
     assert s.read_only is True                        # writes opt-in
-    assert s.subdomain == "doubledeer.dealpos.co.id"  # only the two secrets are required
+    assert s.subdomain.endswith(".dealpos.co.id")     # only the two secrets are required
 
 
 def test_settings_missing_credentials_raises(monkeypatch):
@@ -37,7 +37,7 @@ def test_rate_limit_defaults_sit_under_the_api_limit_and_are_overridable(monkeyp
 
 
 def test_env_read_only_true_beats_dotenv_false(monkeypatch, tmp_path):
-    # MF agents run dealpos-mcp with DEALPOS_READ_ONLY=true while Django's .env says false.
+    # Agents run dealpos-mcp with DEALPOS_READ_ONLY=true while the .env says false.
     env = tmp_path / ".env"
     env.write_text("DEALPOS_READ_ONLY=false\nDEALPOS_CLIENT_ID=cid\nDEALPOS_CLIENT_SECRET=sec\n")
     monkeypatch.setenv("DEALPOS_READ_ONLY", "true")

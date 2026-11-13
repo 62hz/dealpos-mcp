@@ -11,7 +11,9 @@ def _writes_enabled(monkeypatch):
 
 @pytest.fixture
 def settings():
-    return Settings(subdomain="doubledeer.dealpos.co.id", client_id="cid", client_secret="sec")
+    # _env_file=None: a developer's own .env must not leak into the suite.
+    return Settings(subdomain="example.dealpos.co.id", client_id="cid", client_secret="sec",
+                    default_outlet="Main Store", _env_file=None)
 
 
 @pytest.fixture

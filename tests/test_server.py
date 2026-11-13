@@ -1,7 +1,7 @@
 import os
 
 # server.py builds Settings() at import time — provide dummy creds before importing.
-os.environ.setdefault("DEALPOS_SUBDOMAIN", "doubledeer.dealpos.co.id")
+os.environ.setdefault("DEALPOS_SUBDOMAIN", "example.dealpos.co.id")
 os.environ.setdefault("DEALPOS_CLIENT_ID", "test-id")
 os.environ.setdefault("DEALPOS_CLIENT_SECRET", "test-secret")
 

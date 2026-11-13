@@ -8,7 +8,7 @@ from dealpos_mcp.config import Settings
 
 
 def _token():
-    respx.post("https://doubledeer.dealpos.co.id/api/v3/Token/OAuth2").mock(
+    respx.post("https://example.dealpos.co.id/api/v3/Token/OAuth2").mock(
         return_value=httpx.Response(200, json={"access_token": "tok", "expires_in": 1000}))
 
 
@@ -17,7 +17,7 @@ def _token():
 @respx.mock
 async def test_get_sales_summary_returns_totals_and_top(client):
     _token()
-    respx.get("https://doubledeer.dealpos.co.id/api/v3/Report/ProductSold").mock(
+    respx.get("https://example.dealpos.co.id/api/v3/Report/ProductSold").mock(
         return_value=httpx.Response(200, json=[
             {"Name": "Vinyl A", "Code": "VA", "Quantity": 10,
              "Cost": 2000000, "Sales": 3500000, "Profit": 1500000},
@@ -37,7 +37,7 @@ async def test_get_sales_summary_returns_totals_and_top(client):
 @respx.mock
 async def test_check_low_stock_uses_threshold_then_fallback(client):
     _token()
-    respx.get("https://doubledeer.dealpos.co.id/api/v3/Inventory").mock(
+    respx.get("https://example.dealpos.co.id/api/v3/Inventory").mock(
         return_value=httpx.Response(200, json=[
             {"Product": "Record X", "Code": "RX", "I": {"Available": 2, "Threshold": 5}},
             {"Product": "Record Y", "Code": "RY", "I": {"Available": 9, "Threshold": 5}},
@@ -52,7 +52,7 @@ async def test_check_low_stock_uses_threshold_then_fallback(client):
 @respx.mock
 async def test_list_products_passes_required_paging(client):
     _token()
-    route = respx.get("https://doubledeer.dealpos.co.id/api/v3/Product").mock(
+    route = respx.get("https://example.dealpos.co.id/api/v3/Product").mock(
         return_value=httpx.Response(200, json={
             "DataArray": [{"Name": "Vinyl A", "Code": "VA"}], "RecordsCount": -1}))
     out = await tools.list_products(client, name="Vinyl", compact=False)
@@ -64,7 +64,7 @@ async def test_list_products_passes_required_paging(client):
 @respx.mock
 async def test_list_products_unwraps_dataarray_envelope(client):
     _token()
-    respx.get("https://doubledeer.dealpos.co.id/api/v3/Product").mock(
+    respx.get("https://example.dealpos.co.id/api/v3/Product").mock(
         return_value=httpx.Response(200, json={
             "DataArray": [{"Code": "A"}, {"Code": "B"}], "RecordsCount": -1}))
     out = await tools.list_products(client, compact=False)
@@ -74,7 +74,7 @@ async def test_list_products_unwraps_dataarray_envelope(client):
 @respx.mock
 async def test_list_products_paginates_past_full_page(client):
     _token()
-    route = respx.get("https://doubledeer.dealpos.co.id/api/v3/Product").mock(
+    route = respx.get("https://example.dealpos.co.id/api/v3/Product").mock(
         side_effect=[
             httpx.Response(200, json={"DataArray": [{"Code": str(i)} for i in range(500)],
                                        "RecordsCount": -1}),
@@ -89,7 +89,7 @@ async def test_list_products_paginates_past_full_page(client):
 @respx.mock
 async def test_get_product_by_code(client):
     _token()
-    respx.get("https://doubledeer.dealpos.co.id/api/v3/Product/Code").mock(
+    respx.get("https://example.dealpos.co.id/api/v3/Product/Code").mock(
         return_value=httpx.Response(200, json={"Name": "Vinyl A", "Code": "VA"}))
     out = await tools.get_product(client, code="VA")
     assert out["Name"] == "Vinyl A"
@@ -105,7 +105,7 @@ async def test_get_product_by_code(client):
 @respx.mock
 async def test_get_variant_detail_by_code():
     _token()
-    c = DealPOSClient(Settings(subdomain="doubledeer.dealpos.co.id", client_id="cid",
+    c = DealPOSClient(Settings(subdomain="example.dealpos.co.id", client_id="cid",
                                client_secret="sec", _env_file=None))
     respx.get(f"{BASE}/api/v3/Variant/Detail").mock(return_value=httpx.Response(200, json={
         "Code": "SYIN200PAIR-CW", "Type": "Composite", "Weight": 0,
@@ -120,7 +120,7 @@ async def test_get_variant_detail_by_code():
 @respx.mock
 async def test_create_product_builds_required_body(client):
     _token()
-    route = respx.post("https://doubledeer.dealpos.co.id/api/v3/Product").mock(
+    route = respx.post("https://example.dealpos.co.id/api/v3/Product").mock(
         return_value=httpx.Response(200, json={"Code": "VINYL-001"}))
     out = await tools.create_product(client, name="New Vinyl", code="VINYL-001",
                                      category="Music/Vinyl", brand="Double Deer",
@@ -136,13 +136,13 @@ async def test_create_product_builds_required_body(client):
 @respx.mock
 async def test_update_product_price_sends_full_product_body(client):
     _token()
-    respx.get("https://doubledeer.dealpos.co.id/api/v3/Product/Code").mock(
+    respx.get("https://example.dealpos.co.id/api/v3/Product/Code").mock(
         return_value=httpx.Response(200, json={
             "Category": "Music/Vinyl", "Name": "Vinyl A", "Brand": "DD", "Code": "VA",
             "Discontinued": False, "ImageURL": "",
             "Variants": [{"Model": "Standard", "Code": "VA", "UnitCost": 100000,
                           "UnitPrice": 300000, "Discontinued": False}]}))
-    route = respx.put("https://doubledeer.dealpos.co.id/api/v3/Product").mock(
+    route = respx.put("https://example.dealpos.co.id/api/v3/Product").mock(
         return_value=httpx.Response(200, json={"Code": "VA"}))
     out = await tools.update_product_price(client, code="VA", new_price=420000)
     assert out["Code"] == "VA"
@@ -155,9 +155,9 @@ async def test_update_product_price_sends_full_product_body(client):
 @respx.mock
 async def test_create_customer_fetches_newcode_when_missing(client):
     _token()
-    respx.get("https://doubledeer.dealpos.co.id/api/v3/Customer/NewCode").mock(
+    respx.get("https://example.dealpos.co.id/api/v3/Customer/NewCode").mock(
         return_value=httpx.Response(200, json={"Code": "CUST-009"}))
-    route = respx.post("https://doubledeer.dealpos.co.id/api/v3/Customer").mock(
+    route = respx.post("https://example.dealpos.co.id/api/v3/Customer").mock(
         return_value=httpx.Response(200, json={"Code": "CUST-009", "Name": "Rian"}))
     out = await tools.create_customer(client, name="Rian", email="rian@example.com",
                                       mobile_phone="08123456789")
@@ -174,7 +174,7 @@ async def test_create_customer_fetches_newcode_when_missing(client):
 import json as _json
 
 
-BASE = "https://doubledeer.dealpos.co.id"
+BASE = "https://example.dealpos.co.id"
 
 
 # --- list_inventory exposed ---
@@ -293,10 +293,10 @@ async def test_list_outlets(client):
     _token()
     route = respx.get(f"{BASE}/api/v3/Outlet").mock(
         return_value=httpx.Response(200, json=[
-            {"ID": "410ba2b7-8eff-4759-b5f1-cf47b33ef1cc", "Name": "MF Store",
+            {"ID": "00000000-0000-4000-8000-000000000001", "Name": "Main Store",
              "Code": "B1", "Suspended": False}]))
     out = await tools.list_outlets(client)
-    assert out[0]["Name"] == "MF Store"
+    assert out[0]["Name"] == "Main Store"
     # bare GET 400s: Suspended is required and must be a bool-ish string
     assert route.calls[0].request.url.params["Suspended"] == "false"
 
@@ -407,7 +407,7 @@ def _outlets():
     """Mock the outlet lookup list_invoices needs to resolve OutletID."""
     respx.get(f"{BASE}/api/v3/Outlet").mock(
         return_value=httpx.Response(200, json=[
-            {"ID": "410ba2b7-8eff-4759-b5f1-cf47b33ef1cc", "Name": "MF Store",
+            {"ID": "00000000-0000-4000-8000-000000000001", "Name": "Main Store",
              "Code": "B1", "Suspended": False}]))
 
 
@@ -467,9 +467,9 @@ async def test_list_invoices_sends_outlet_guid_not_name(client):
     route = respx.get(f"{BASE}/api/v3/Invoice/WithTotalCount").mock(
         return_value=httpx.Response(200, json={"Data": [], "TotalCount": 0}))
     await tools.list_invoices(client, date_from="2026-01-01", date_to="2026-06-30",
-                              outlet="MF Store")
+                              outlet="Main Store")
     p = route.calls[0].request.url.params
-    assert p["OutletID"] == "410ba2b7-8eff-4759-b5f1-cf47b33ef1cc"
+    assert p["OutletID"] == "00000000-0000-4000-8000-000000000001"
     assert "Outlet" not in p
 
 
@@ -718,8 +718,8 @@ async def test_get_inventory_log_outlet(client):
     _token()
     route = respx.get(f"{BASE}/api/v3/Inventory/Log").mock(
         return_value=httpx.Response(200, json=[]))
-    await tools.get_inventory_log(client, "VNL-001", outlet="MF Store")
-    assert route.calls[0].request.url.params["Outlet"] == "MF Store"
+    await tools.get_inventory_log(client, "VNL-001", outlet="Main Store")
+    assert route.calls[0].request.url.params["Outlet"] == "Main Store"
 
 
 @respx.mock
@@ -740,7 +740,7 @@ async def test_get_inventory_log_code_and_dates(client):
 def _adj(n, state="Accepted", typ="Adjust"):
     """Row shaped like a live Adjustment list row (keys checked 2026-11-08)."""
     return {"ID": f"id-{n}", "Number": f"MFS-{n}", "Date": "2026-10-01T00:00:00",
-            "Outlet": "MF Store", "Type": typ, "State": state, "QuantitySUM": -1,
+            "Outlet": "Main Store", "Type": typ, "State": state, "QuantitySUM": -1,
             "SKUCount": 1, "TotalCost": 0, "PIC": "MF Web Checkout", "Note": "x"}
 
 
@@ -749,10 +749,10 @@ async def test_list_adjustments_sends_filters_and_returns_rows(client):
     _token()
     route = respx.get(f"{BASE}/api/v3/Adjustment").mock(
         return_value=httpx.Response(200, json=[_adj(1), _adj(2)]))
-    out = await tools.list_adjustments(client, "2026-10-01", "2026-10-31", outlet="MF Store",
+    out = await tools.list_adjustments(client, "2026-10-01", "2026-10-31", outlet="Main Store",
                                        state="Accepted", adjustment_type="Adjust")
     p = route.calls[0].request.url.params
-    assert (p["From"], p["To"], p["Outlet"]) == ("2026-10-01", "2026-10-31", "MF Store")
+    assert (p["From"], p["To"], p["Outlet"]) == ("2026-10-01", "2026-10-31", "Main Store")
     assert (p["State"], p["Type"], p["PageNumber"], p["PageSize"]) == ("Accepted", "Adjust", "1", "500")
     assert out["count"] == 2 and "truncated" not in out
 
@@ -780,7 +780,7 @@ async def test_list_adjustments_pages_and_warns_at_the_cap(client):
     assert capped["truncated"] is True and "3 pages" in capped["warning"]
 
 
-_DETAIL = {"ID": "id-1", "Number": "MFS-1", "State": "Accepted", "Outlet": "MF Store",
+_DETAIL = {"ID": "id-1", "Number": "MFS-1", "State": "Accepted", "Outlet": "Main Store",
            "AdjustedInventory": [{"Code": "SKU1", "Quantity": -1, "UnitCost": 5,
                                   "ImageUrl": "https://x/y.png", "ThumbnailUrl": "t",
                                   "Parents": ["p"]}],
@@ -804,8 +804,8 @@ async def test_get_adjustment_by_number_sends_the_outlet(client):
     _token()
     route = respx.get(f"{BASE}/api/v3/Adjustment/Detail").mock(
         return_value=httpx.Response(200, json=_DETAIL))
-    await tools.get_adjustment(client, number="MFS-1", outlet="MF Store")
-    assert dict(route.calls[0].request.url.params) == {"Number": "MFS-1", "Outlet": "MF Store"}
+    await tools.get_adjustment(client, number="MFS-1", outlet="Main Store")
+    assert dict(route.calls[0].request.url.params) == {"Number": "MFS-1", "Outlet": "Main Store"}
 
 
 async def test_get_adjustment_number_without_any_outlet_raises(monkeypatch):
@@ -864,7 +864,7 @@ async def test_reject_adjustment_puts_outlet_and_number(client):
     route = respx.put(f"{BASE}/api/v3/Adjustment/Reject").mock(
         return_value=httpx.Response(200, json={"Message": "Rejected"}))
     await tools.reject_adjustment(client, "ADJ-1")
-    assert _json.loads(route.calls[0].request.content) == {"Outlet": "MF Store",
+    assert _json.loads(route.calls[0].request.content) == {"Outlet": "Main Store",
                                                            "Number": "ADJ-1"}
 
 
@@ -896,13 +896,13 @@ async def test_adjust_stock_multi_item(client):
 async def test_adjust_stock_sends_outlet_and_reference():
     _token()
     _adj_readback()
-    c = DealPOSClient(Settings(subdomain="doubledeer.dealpos.co.id", client_id="cid",
-                               client_secret="sec", default_outlet="MF Store", _env_file=None))
+    c = DealPOSClient(Settings(subdomain="example.dealpos.co.id", client_id="cid",
+                               client_secret="sec", default_outlet="Main Store", _env_file=None))
     route = respx.post(f"{BASE}/api/v3/Adjustment").mock(
         return_value=httpx.Response(200, json={"ID": "adj-4"}))
     await tools.adjust_stock(c, [{"code": "A", "qty": 1}], reference="ADJ-TEST-0001")
     body = _json.loads(route.calls[0].request.content)
-    assert body["Outlet"] == "MF Store"
+    assert body["Outlet"] == "Main Store"
     assert body["Number"] == "ADJ-TEST-0001"
 
 
@@ -910,8 +910,8 @@ async def test_adjust_stock_sends_outlet_and_reference():
 async def test_adjust_stock_generates_reference_when_omitted():
     _token()
     _adj_readback()
-    c = DealPOSClient(Settings(subdomain="doubledeer.dealpos.co.id", client_id="cid",
-                               client_secret="sec", default_outlet="MF Store", _env_file=None))
+    c = DealPOSClient(Settings(subdomain="example.dealpos.co.id", client_id="cid",
+                               client_secret="sec", default_outlet="Main Store", _env_file=None))
     route = respx.post(f"{BASE}/api/v3/Adjustment").mock(
         return_value=httpx.Response(200, json={"ID": "adj-5"}))
     await tools.adjust_stock(c, [{"code": "A", "qty": 1}])
@@ -1049,8 +1049,8 @@ async def test_adjust_stock_requires_default_outlet():
 # --- set_variant_weights ---
 
 def _w_client():
-    return DealPOSClient(Settings(subdomain="doubledeer.dealpos.co.id", client_id="cid",
-                                  client_secret="sec", default_outlet="MF Store",
+    return DealPOSClient(Settings(subdomain="example.dealpos.co.id", client_id="cid",
+                                  client_secret="sec", default_outlet="Main Store",
                                   _env_file=None))
 
 
@@ -1059,7 +1059,7 @@ COMPOSITE_DETAIL = {
     "UnitCost": 1307482, "UnitPrice": 2079000, "Taxable": True, "LoyaltyPoint": True,
     "Discontinued": False, "ImageURL": "", "Description": "",
     "Components": [{"Code": "SYIN200-CW", "Name": "N200 CW", "Qty": 2}],
-    "OutletPrice": [{"Outlet": "MF Store", "Price": 2079000, "ExtraCost": 0}],
+    "OutletPrice": [{"Outlet": "Main Store", "Price": 2079000, "ExtraCost": 0}],
 }
 
 
@@ -1078,7 +1078,7 @@ async def test_set_variant_weights_preserves_composite_components():
     assert body["Weight"] == 1720
     assert body["Type"] == "Composite"
     assert body["Components"] == [{"Code": "SYIN200-CW", "Qty": 2}]
-    assert body["OutletPrice"] == [{"Outlet": "MF Store", "Price": 2079000, "ExtraCost": 0}]
+    assert body["OutletPrice"] == [{"Outlet": "Main Store", "Price": 2079000, "ExtraCost": 0}]
 
 
 @respx.mock
@@ -1136,8 +1136,8 @@ async def test_set_variant_weights_requires_items():
 # --- pricebook ---
 
 def _pb_client():
-    return DealPOSClient(Settings(subdomain="doubledeer.dealpos.co.id", client_id="cid",
-                                  client_secret="sec", default_outlet="MF Store",
+    return DealPOSClient(Settings(subdomain="example.dealpos.co.id", client_id="cid",
+                                  client_secret="sec", default_outlet="Main Store",
                                   _env_file=None))
 
 
@@ -1239,8 +1239,8 @@ async def test_get_pricebook_missing_raises():
 @respx.mock
 async def test_create_composite_variant_two_call_payloads():
     _token()
-    c = DealPOSClient(Settings(subdomain="doubledeer.dealpos.co.id", client_id="cid",
-                               client_secret="sec", default_outlet="MF Store", _env_file=None))
+    c = DealPOSClient(Settings(subdomain="example.dealpos.co.id", client_id="cid",
+                               client_secret="sec", default_outlet="Main Store", _env_file=None))
     add = respx.post(f"{BASE}/api/v3/Variant/Add").mock(
         return_value=httpx.Response(200, json={"ID": "p-1"}))
     put = respx.put(f"{BASE}/api/v3/Variant").mock(
@@ -1265,14 +1265,14 @@ async def test_create_composite_variant_two_call_payloads():
     assert b["Code"] == "SPK-SYI-N200PR-CW"
     assert b["Type"] == "Composite"
     assert b["Components"] == [{"Code": "SYIN200-CW", "Qty": 2}]
-    assert b["OutletPrice"] == [{"Outlet": "MF Store", "Price": 2079000}]
+    assert b["OutletPrice"] == [{"Outlet": "Main Store", "Price": 2079000}]
 
 
 @respx.mock
 async def test_create_composite_variant_outlet_override():
     _token()
-    c = DealPOSClient(Settings(subdomain="doubledeer.dealpos.co.id", client_id="cid",
-                               client_secret="sec", default_outlet="MF Store", _env_file=None))
+    c = DealPOSClient(Settings(subdomain="example.dealpos.co.id", client_id="cid",
+                               client_secret="sec", default_outlet="Main Store", _env_file=None))
     respx.post(f"{BASE}/api/v3/Variant/Add").mock(
         return_value=httpx.Response(200, json={"ID": "p-1"}))
     put = respx.put(f"{BASE}/api/v3/Variant").mock(
@@ -1294,7 +1294,7 @@ async def test_create_composite_variant_requires_outlet():
 
 async def test_create_composite_variant_requires_components():
     c = DealPOSClient(Settings(subdomain="x", client_id="a", client_secret="b",
-                               default_outlet="MF Store", _env_file=None))
+                               default_outlet="Main Store", _env_file=None))
     with pytest.raises(DealPOSError):
         await tools.create_composite_variant(
             c, product_code="P", variant_code="V", model="M", price=100, components=[])
@@ -1309,8 +1309,8 @@ async def test_set_variant_composite_put_only():
     product) — retry the conversion without re-running Variant/Add, which would 400 on the
     now-existing code."""
     _token()
-    c = DealPOSClient(Settings(subdomain="doubledeer.dealpos.co.id", client_id="cid",
-                               client_secret="sec", default_outlet="MF Store", _env_file=None))
+    c = DealPOSClient(Settings(subdomain="example.dealpos.co.id", client_id="cid",
+                               client_secret="sec", default_outlet="Main Store", _env_file=None))
     put = respx.put(f"{BASE}/api/v3/Variant").mock(
         return_value=httpx.Response(200, json={"Message": "Variant has been updated"}))
     await tools.set_variant_composite(
@@ -1320,7 +1320,7 @@ async def test_set_variant_composite_put_only():
     assert b["Code"] == "SYIN200PAIR-CW"
     assert b["Type"] == "Composite"
     assert b["Components"] == [{"Code": "SYIN200-CW", "Qty": 2}]
-    assert b["OutletPrice"] == [{"Outlet": "MF Store", "Price": 2079000}]
+    assert b["OutletPrice"] == [{"Outlet": "Main Store", "Price": 2079000}]
 
 
 async def test_set_variant_composite_requires_outlet():
@@ -1332,7 +1332,7 @@ async def test_set_variant_composite_requires_outlet():
 
 async def test_set_variant_composite_requires_components():
     c = DealPOSClient(Settings(subdomain="x", client_id="a", client_secret="b",
-                               default_outlet="MF Store", _env_file=None))
+                               default_outlet="Main Store", _env_file=None))
     with pytest.raises(DealPOSError):
         await tools.set_variant_composite(c, variant_code="V", price=100, components=[])
 
@@ -1366,7 +1366,7 @@ async def test_get_inbound_logistics_pages(client):
 @respx.mock
 async def test_list_products_compact_strips_heavy_fields(client):
     _token()
-    respx.get("https://doubledeer.dealpos.co.id/api/v3/Product").mock(
+    respx.get("https://example.dealpos.co.id/api/v3/Product").mock(
         return_value=httpx.Response(200, json={
             "DataArray": [{
                 "ID": "p1", "Code": "VINYL-A", "Category": "Vinyl Import", "Name": "Vinyl A",
@@ -1408,7 +1408,7 @@ async def test_list_products_compact_strips_heavy_fields(client):
 @respx.mock
 async def test_list_products_compact_false_returns_raw(client):
     _token()
-    respx.get("https://doubledeer.dealpos.co.id/api/v3/Product").mock(
+    respx.get("https://example.dealpos.co.id/api/v3/Product").mock(
         return_value=httpx.Response(200, json={
             "DataArray": [{
                 "ID": "p1", "Category": "Vinyl Import", "Name": "Vinyl A",
