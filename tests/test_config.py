@@ -50,3 +50,15 @@ def test_dotenv_is_read_only_from_the_package_root():
     carry DEALPOS_READ_ONLY=false and silently enable writes (audit 2026-11-13)."""
     from dealpos_mcp.config import ENV_FILE, Settings
     assert Settings.model_config["env_file"] == str(ENV_FILE)
+
+
+def test_cwd_dotenv_is_ignored(monkeypatch, tmp_path):
+    (tmp_path / ".env").write_text(
+        "DEALPOS_READ_ONLY=false\nDEALPOS_DEFAULT_OUTLET=CWD-OUTLET\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("DEALPOS_READ_ONLY", raising=False)
+    monkeypatch.delenv("DEALPOS_DEFAULT_OUTLET", raising=False)
+    monkeypatch.setenv("DEALPOS_CLIENT_ID", "cid")
+    monkeypatch.setenv("DEALPOS_CLIENT_SECRET", "sec")
+    s = Settings()  # default env_file, as the server builds it
+    assert s.default_outlet != "CWD-OUTLET"
