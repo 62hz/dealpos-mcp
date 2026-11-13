@@ -251,12 +251,14 @@ async def get_adjustment(adjustment_id: str | None = None, number: str | None = 
 
 
 @mcp.tool()
-async def adjust_stock(items: list[dict], notes: str | None = None) -> dict:
-    """Create stock adjustment. items: [{code, qty, reason?}] — MUST be a JSON array
-    of objects, never a comma-separated string.
-    Positive qty = add, negative = remove.
-    Confirm quantities with the user before calling."""
-    return await tools.adjust_stock(_client, items, notes=notes)
+async def adjust_stock(items: list[dict], notes: str | None = None,
+                       reference: str | None = None) -> dict:
+    """Create a stock adjustment at the default outlet. items: [{code, qty, reason?}] —
+    MUST be a JSON array of objects, never a comma-separated string. code = VARIANT code;
+    qty = non-zero whole number (+ add, - remove); each code once. reference = optional
+    adjustment Number (auto-generated otherwise). Returns the adjustment's State; anything
+    but Accepted means stock has NOT moved yet. Confirm quantities with the user first."""
+    return await tools.adjust_stock(_client, items, notes=notes, reference=reference)
 
 
 @mcp.tool()

@@ -1,3 +1,4 @@
+import secrets
 from datetime import date, datetime, timedelta
 
 from .client import DealPOSClient, DealPOSError
@@ -806,11 +807,29 @@ async def get_adjustment(client: DealPOSClient, number: str | None = None,
 
 # --- stock adjustment ---
 
+def _check_adjust_items(items: list[dict]) -> None:
+    if not items:
+        raise DealPOSError("adjust_stock needs at least one item.")
+    seen: set[str] = set()
+    for i in items:
+        code, qty = i.get("code"), i.get("qty")
+        if not isinstance(code, str) or not code.strip():
+            raise DealPOSError(f"Each item needs a variant 'code'; got {i!r}.")
+        if isinstance(qty, bool) or not isinstance(qty, int):
+            raise DealPOSError(f"qty for {code!r} must be a whole number; got {qty!r}.")
+        if qty == 0:
+            raise DealPOSError(f"qty for {code!r} must be non-zero.")
+        if code in seen:
+            raise DealPOSError(f"{code!r} appears twice; combine it into one line.")
+        seen.add(code)
+
+
 async def adjust_stock(client: DealPOSClient, items: list[dict],
                        notes: str | None = None, reference: str | None = None) -> dict:
     """Delta stock adjustment ("Create Adjustment by Adjusting Differences" —
     POST /api/v3/Adjustment). Each item: {code, qty, reason?}.
-    Positive qty = add stock; negative = remove stock.
+    Positive qty = add stock; negative = remove stock. Items are validated before any
+    call, and the returned dict carries the read-back `State`.
 
     Verified live against https://developer.dealpos.com/openapi/openapi/inventory-adjustment/createadjustmentbyadjustingdifferences.md
     on 2026-08-11. The earlier version of this function sent "Details" and "Notes" —
@@ -824,6 +843,7 @@ async def adjust_stock(client: DealPOSClient, items: list[dict],
     supply one; otherwise a timestamp-based one is generated so repeated adjustments
     never collide.
     """
+    _check_adjust_items(items)
     if not client.s.default_outlet:
         raise DealPOSError(
             "Adjustment requires an outlet and DEALPOS_DEFAULT_OUTLET is unset "
@@ -832,7 +852,7 @@ async def adjust_stock(client: DealPOSClient, items: list[dict],
     body: dict = {
         "Outlet": client.s.default_outlet,
         "Date": date.today().strftime("%Y/%m/%d"),
-        "Number": reference or f"ADJ-{datetime.now():%Y%m%d-%H%M%S}",
+        "Number": reference or f"ADJ-{datetime.now():%Y%m%d-%H%M%S}-{secrets.token_hex(2)}",
         "Variants": [
             {
                 "Code": i["code"],
@@ -844,7 +864,18 @@ async def adjust_stock(client: DealPOSClient, items: list[dict],
     }
     if notes:
         body["Note"] = notes
-    return await client.request("POST", "/api/v3/Adjustment", json=body)
+    resp = await client.request("POST", "/api/v3/Adjustment", json=body)
+    adj_id = resp.get("ID") if isinstance(resp, dict) else None
+    if not adj_id:
+        return resp
+    # WebApp 26.35: adjustments run the approval workflow; stock moves only when Accepted.
+    state = (await get_adjustment(client, adjustment_id=adj_id)).get("State")
+    out = dict(resp, Number=body["Number"], State=state)
+    if state != "Accepted":
+        out["warning"] = (f"Adjustment {body['Number']} is {state!r}, so stock has not moved "
+                          "yet. Someone with the 'Adjustment - Approve' role must accept it "
+                          "in DealPOS.")
+    return out
 
 
 # --- logistics ---

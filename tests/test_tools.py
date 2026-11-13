@@ -799,9 +799,15 @@ async def test_get_adjustment_needs_exactly_one_key(client, kw):
 
 # --- adjust_stock ---
 
+def _adj_readback(state="Accepted"):
+    return respx.get(f"{BASE}/api/v3/Adjustment/Detail").mock(
+        return_value=httpx.Response(200, json=dict(_DETAIL, State=state)))
+
+
 @respx.mock
 async def test_adjust_stock_payload(client):
     _token()
+    _adj_readback()
     route = respx.post(f"{BASE}/api/v3/Adjustment").mock(
         return_value=httpx.Response(200, json={"ID": "adj-1"}))
     items = [{"code": "VNL-001", "qty": 5, "reason": "Restock"}]
@@ -817,6 +823,7 @@ async def test_adjust_stock_payload(client):
 @respx.mock
 async def test_adjust_stock_negative_qty(client):
     _token()
+    _adj_readback()
     route = respx.post(f"{BASE}/api/v3/Adjustment").mock(
         return_value=httpx.Response(200, json={"ID": "adj-2"}))
     await tools.adjust_stock(client, [{"code": "CD-001", "qty": -3, "reason": "Damaged"}])
@@ -827,6 +834,7 @@ async def test_adjust_stock_negative_qty(client):
 @respx.mock
 async def test_adjust_stock_multi_item(client):
     _token()
+    _adj_readback()
     route = respx.post(f"{BASE}/api/v3/Adjustment").mock(
         return_value=httpx.Response(200, json={"ID": "adj-3"}))
     items = [{"code": "A", "qty": 10}, {"code": "B", "qty": -2, "reason": "Fix"}]
@@ -839,6 +847,7 @@ async def test_adjust_stock_multi_item(client):
 @respx.mock
 async def test_adjust_stock_sends_outlet_and_reference():
     _token()
+    _adj_readback()
     c = DealPOSClient(Settings(subdomain="doubledeer.dealpos.co.id", client_id="cid",
                                client_secret="sec", default_outlet="MF Store", _env_file=None))
     route = respx.post(f"{BASE}/api/v3/Adjustment").mock(
@@ -852,6 +861,7 @@ async def test_adjust_stock_sends_outlet_and_reference():
 @respx.mock
 async def test_adjust_stock_generates_reference_when_omitted():
     _token()
+    _adj_readback()
     c = DealPOSClient(Settings(subdomain="doubledeer.dealpos.co.id", client_id="cid",
                                client_secret="sec", default_outlet="MF Store", _env_file=None))
     route = respx.post(f"{BASE}/api/v3/Adjustment").mock(
@@ -859,6 +869,49 @@ async def test_adjust_stock_generates_reference_when_omitted():
     await tools.adjust_stock(c, [{"code": "A", "qty": 1}])
     body = _json.loads(route.calls[0].request.content)
     assert body["Number"].startswith("ADJ-")
+
+
+@pytest.mark.parametrize("items, needle", [
+    ([], "at least one"),
+    ([{"qty": 1}], "code"),
+    ([{"code": "A", "qty": 0}], "non-zero"),
+    ([{"code": "A", "qty": 1.5}], "whole number"),
+    ([{"code": "A", "qty": True}], "whole number"),
+    ([{"code": "A", "qty": 1}, {"code": "A", "qty": 2}], "twice"),
+])
+async def test_adjust_stock_rejects_bad_items(client, items, needle):
+    with pytest.raises(DealPOSError, match=needle):
+        await tools.adjust_stock(client, items)
+
+
+@respx.mock
+async def test_adjust_stock_references_do_not_collide(client):
+    _token(); _adj_readback()
+    route = respx.post(f"{BASE}/api/v3/Adjustment").mock(
+        return_value=httpx.Response(200, json={"ID": "id-1"}))
+    await tools.adjust_stock(client, [{"code": "A", "qty": 1}])
+    await tools.adjust_stock(client, [{"code": "A", "qty": -1}])
+    n1, n2 = (_json.loads(c.request.content)["Number"] for c in route.calls)
+    assert n1 != n2
+
+
+@respx.mock
+async def test_adjust_stock_reports_state_and_warns_when_not_accepted(client):
+    _token(); _adj_readback("InReview")
+    respx.post(f"{BASE}/api/v3/Adjustment").mock(
+        return_value=httpx.Response(200, json={"ID": "id-1"}))
+    out = await tools.adjust_stock(client, [{"code": "A", "qty": 1}])
+    assert out["State"] == "InReview"
+    assert "not moved" in out["warning"]
+
+
+@respx.mock
+async def test_adjust_stock_accepted_has_no_warning(client):
+    _token(); _adj_readback("Accepted")
+    respx.post(f"{BASE}/api/v3/Adjustment").mock(
+        return_value=httpx.Response(200, json={"ID": "id-1"}))
+    out = await tools.adjust_stock(client, [{"code": "A", "qty": 1}])
+    assert out["State"] == "Accepted" and "warning" not in out
 
 
 async def test_adjust_stock_requires_default_outlet():
