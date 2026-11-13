@@ -617,7 +617,7 @@ async def test_update_product_price_changes_only_the_named_variant(client):
 
 @pytest.mark.parametrize("field", ["Code", "ID", "Variants"])
 async def test_update_product_refuses_protected_fields(client, field):
-    with pytest.raises(DealPOSError, match=field):
+    with pytest.raises(DealPOSError, match=rf"won't change \['{field}'\]"):
         await tools.update_product(client, "P01", {field: "x"})
 
 
@@ -912,6 +912,19 @@ async def test_adjust_stock_accepted_has_no_warning(client):
         return_value=httpx.Response(200, json={"ID": "id-1"}))
     out = await tools.adjust_stock(client, [{"code": "A", "qty": 1}])
     assert out["State"] == "Accepted" and "warning" not in out
+
+
+@respx.mock
+async def test_adjust_stock_readback_failure_still_returns_the_created_adjustment(client):
+    """The POST already moved (or queued) stock; a failed read-back must not look like a
+    failed adjustment, or the caller retries and adjusts twice."""
+    _token()
+    respx.get(f"{BASE}/api/v3/Adjustment/Detail").mock(return_value=httpx.Response(500))
+    respx.post(f"{BASE}/api/v3/Adjustment").mock(
+        return_value=httpx.Response(200, json={"ID": "id-1"}))
+    out = await tools.adjust_stock(client, [{"code": "A", "qty": 1}])
+    assert out["ID"] == "id-1" and out["State"] is None
+    assert "do not retry" in out["warning"]
 
 
 async def test_adjust_stock_requires_default_outlet():

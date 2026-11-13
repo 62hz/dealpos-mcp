@@ -869,7 +869,12 @@ async def adjust_stock(client: DealPOSClient, items: list[dict],
     if not adj_id:
         return resp
     # WebApp 26.35: adjustments run the approval workflow; stock moves only when Accepted.
-    state = (await get_adjustment(client, adjustment_id=adj_id)).get("State")
+    try:
+        state = (await get_adjustment(client, adjustment_id=adj_id)).get("State")
+    except DealPOSError as e:
+        return dict(resp, Number=body["Number"], State=None, warning=(
+            f"Adjustment {body['Number']} was created, but reading back its State failed "
+            f"({e}). Check it with get_adjustment; do not retry adjust_stock."))
     out = dict(resp, Number=body["Number"], State=state)
     if state != "Accepted":
         out["warning"] = (f"Adjustment {body['Number']} is {state!r}, so stock has not moved "
