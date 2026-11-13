@@ -76,8 +76,17 @@ class DealPOSClient:
         for attempt in range(_max_retries + 1):
             token = await self._get_token()
             await self._limiter.acquire()
-            r = await self._http.request(method, path, params=params, json=json,
-                                         headers={"Authorization": f"Bearer {token}"})
+            try:
+                r = await self._http.request(method, path, params=params, json=json,
+                                             headers={"Authorization": f"Bearer {token}"})
+            except httpx.TransportError as e:
+                if method.upper() == "GET":
+                    raise DealPOSError(f"Network error talking to DealPOS "
+                                       f"({type(e).__name__}); retry.") from e
+                raise DealPOSError(
+                    f"Network error during {method.upper()} {path} ({type(e).__name__}): the "
+                    "write may or may not have landed. Check before retrying (e.g. "
+                    "list_adjustments / get_product).") from e
             if r.status_code == 429 and attempt < _max_retries:
                 await asyncio.sleep(float(r.headers.get("Retry-After", "1")))
                 continue
@@ -91,7 +100,10 @@ class DealPOSClient:
                 except Exception:
                     msg = r.text
                 raise DealPOSError(f"DealPOS API error ({r.status_code}): {msg}")
-            return r.json()
+            try:
+                return r.json()
+            except ValueError:  # a successful write may answer plain text
+                return r.text
         raise DealPOSError("DealPOS API error: retries exhausted.")
 
     async def aclose(self) -> None:

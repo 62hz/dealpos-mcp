@@ -920,6 +920,71 @@ async def test_adjust_stock_readback_failure_still_returns_the_created_adjustmen
     assert "do not retry" in out["warning"]
 
 
+@respx.mock
+async def test_adjust_stock_without_an_id_reads_back_by_number_and_outlet(client):
+    _token()
+    detail = _adj_readback("InReview")
+    respx.post(f"{BASE}/api/v3/Adjustment").mock(return_value=httpx.Response(200, json={}))
+    out = await tools.adjust_stock(client, [{"code": "A", "qty": 1}], reference="ADJ-NOID-1")
+    assert dict(detail.calls[0].request.url.params) == {
+        "Number": "ADJ-NOID-1", "Outlet": client.s.default_outlet}
+    assert out["State"] == "InReview" and out["Number"] == "ADJ-NOID-1"
+    assert "not moved" in out["warning"]
+
+
+@respx.mock
+async def test_adjust_stock_readback_transport_error_returns_a_warning_not_an_exception(client):
+    _token()
+    respx.get(f"{BASE}/api/v3/Adjustment/Detail").mock(side_effect=httpx.ReadTimeout("slow"))
+    respx.post(f"{BASE}/api/v3/Adjustment").mock(
+        return_value=httpx.Response(200, json={"ID": "id-1"}))
+    out = await tools.adjust_stock(client, [{"code": "A", "qty": 1}])
+    assert out["State"] is None and "do not retry" in out["warning"]
+
+
+@respx.mock
+async def test_adjust_stock_non_dict_post_response_is_wrapped(client):
+    _token()
+    detail = _adj_readback("Accepted")
+    respx.post(f"{BASE}/api/v3/Adjustment").mock(
+        return_value=httpx.Response(200, text="Success"))
+    out = await tools.adjust_stock(client, [{"code": "A", "qty": 1}], reference="ADJ-TXT-1")
+    assert out["response"] == "Success" and out["Number"] == "ADJ-TXT-1"
+    assert out["State"] == "Accepted"
+    assert dict(detail.calls[0].request.url.params)["Number"] == "ADJ-TXT-1"
+
+
+@respx.mock
+@pytest.mark.parametrize("detail, needle", [
+    (dict(_DETAIL, State="Rejected"), "was Rejected"),
+    ({k: v for k, v in _DETAIL.items() if k != "State"}, "no State"),
+])
+async def test_adjust_stock_warning_by_state(client, detail, needle):
+    _token()
+    respx.get(f"{BASE}/api/v3/Adjustment/Detail").mock(
+        return_value=httpx.Response(200, json=detail))
+    respx.post(f"{BASE}/api/v3/Adjustment").mock(
+        return_value=httpx.Response(200, json={"ID": "id-1"}))
+    out = await tools.adjust_stock(client, [{"code": "A", "qty": 1}])
+    assert needle in out["warning"]
+    assert "approve" not in out["warning"].lower()
+
+
+@respx.mock
+async def test_adjust_stock_normalizes_code_and_whole_float_qty(client):
+    _token(); _adj_readback()
+    route = respx.post(f"{BASE}/api/v3/Adjustment").mock(
+        return_value=httpx.Response(200, json={"ID": "id-1"}))
+    await tools.adjust_stock(client, [{"code": " A ", "qty": 2.0}])
+    line = _json.loads(route.calls[0].request.content)["Variants"][0]
+    assert line["Code"] == "A" and line["Quantity"] == 2 and isinstance(line["Quantity"], int)
+
+
+async def test_adjust_stock_duplicate_check_ignores_case_and_whitespace(client):
+    with pytest.raises(DealPOSError, match="twice"):
+        await tools.adjust_stock(client, [{"code": "A", "qty": 1}, {"code": " a", "qty": 2}])
+
+
 async def test_adjust_stock_requires_default_outlet():
     c = DealPOSClient(Settings(subdomain="x", client_id="a", client_secret="b", _env_file=None))
     with pytest.raises(DealPOSError):

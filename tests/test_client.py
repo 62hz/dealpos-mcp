@@ -149,3 +149,30 @@ async def test_token_error_names_its_cause(client, status, needle):
     respx.post(TOKEN_URL).mock(return_value=httpx.Response(status, json={}))
     with pytest.raises(DealPOSError, match=needle):
         await client._get_token()
+
+
+@respx.mock
+async def test_post_transport_error_says_the_write_may_have_landed(client):
+    _mock_token()
+    respx.post("https://doubledeer.dealpos.co.id/api/v3/Adjustment").mock(
+        side_effect=httpx.ReadTimeout("slow"))
+    with pytest.raises(DealPOSError, match="may or may not"):
+        await client.request("POST", "/api/v3/Adjustment", json={})
+
+
+@respx.mock
+async def test_get_transport_error_is_a_friendly_retry(client):
+    _mock_token()
+    respx.get("https://doubledeer.dealpos.co.id/api/v3/Outlet").mock(
+        side_effect=httpx.ConnectError("down"))
+    with pytest.raises(DealPOSError, match="retry") as e:
+        await client.request("GET", "/api/v3/Outlet")
+    assert "may or may not" not in str(e.value)
+
+
+@respx.mock
+async def test_non_json_success_body_is_returned_as_text(client):
+    _mock_token()
+    respx.post("https://doubledeer.dealpos.co.id/api/v3/Product").mock(
+        return_value=httpx.Response(200, text="Success"))
+    assert await client.request("POST", "/api/v3/Product", json={}) == "Success"

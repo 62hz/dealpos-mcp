@@ -749,21 +749,28 @@ async def get_adjustment(client: DealPOSClient, number: str | None = None,
 
 # --- stock adjustment ---
 
-def _check_adjust_items(items: list[dict]) -> None:
+def _check_adjust_items(items: list[dict]) -> list[dict]:
+    """Validate and normalize: stripped code, whole-number qty as int. Returns the clean items."""
     if not items:
         raise DealPOSError("adjust_stock needs at least one item.")
     seen: set[str] = set()
+    clean: list[dict] = []
     for i in items:
         code, qty = i.get("code"), i.get("qty")
         if not isinstance(code, str) or not code.strip():
             raise DealPOSError(f"Each item needs a variant 'code'; got {i!r}.")
+        code = code.strip()
+        if isinstance(qty, float) and qty.is_integer():
+            qty = int(qty)
         if isinstance(qty, bool) or not isinstance(qty, int):
             raise DealPOSError(f"qty for {code!r} must be a whole number; got {qty!r}.")
         if qty == 0:
             raise DealPOSError(f"qty for {code!r} must be non-zero.")
-        if code in seen:
+        if code.casefold() in seen:
             raise DealPOSError(f"{code!r} appears twice; combine it into one line.")
-        seen.add(code)
+        seen.add(code.casefold())
+        clean.append({**i, "code": code, "qty": qty})
+    return clean
 
 
 async def adjust_stock(client: DealPOSClient, items: list[dict],
@@ -785,7 +792,7 @@ async def adjust_stock(client: DealPOSClient, items: list[dict],
     supply one; otherwise a timestamp-based one is generated so repeated adjustments
     never collide.
     """
-    _check_adjust_items(items)
+    items = _check_adjust_items(items)
     body: dict = {
         "Outlet": _outlet(client, None, "A stock adjustment"),
         "Date": date.today().strftime("%Y/%m/%d"),
@@ -802,18 +809,28 @@ async def adjust_stock(client: DealPOSClient, items: list[dict],
     if notes:
         body["Note"] = notes
     resp = await client.request("POST", "/api/v3/Adjustment", json=body)
-    adj_id = resp.get("ID") if isinstance(resp, dict) else None
-    if not adj_id:
-        return resp
+    out = dict(resp) if isinstance(resp, dict) else {"response": resp}
+    out["Number"] = body["Number"]
+    adj_id = out.get("ID")
     # WebApp 26.35: adjustments run the approval workflow; stock moves only when Accepted.
+    # Read back by ID, or by Number+Outlet when the POST reply carried no ID.
     try:
-        state = (await get_adjustment(client, adjustment_id=adj_id)).get("State")
-    except DealPOSError as e:
-        return dict(resp, Number=body["Number"], State=None, warning=(
-            f"Adjustment {body['Number']} was created, but reading back its State failed "
-            f"({e}). Check it with get_adjustment; do not retry adjust_stock."))
-    out = dict(resp, Number=body["Number"], State=state)
-    if state != "Accepted":
+        detail = await (get_adjustment(client, adjustment_id=adj_id) if adj_id else
+                        get_adjustment(client, number=body["Number"], outlet=body["Outlet"]))
+        if not isinstance(detail, dict):
+            raise DealPOSError(f"unexpected reply {detail!r}")
+    except Exception as e:  # the POST already went through: never let a read-back look like a failed write
+        out["State"] = None
+        out["warning"] = (f"Adjustment {body['Number']} was sent, but reading back its State "
+                          f"failed ({e}). Check it with get_adjustment; do not retry adjust_stock.")
+        return out
+    state = out["State"] = detail.get("State")
+    if state == "Rejected":
+        out["warning"] = f"Adjustment {body['Number']} was Rejected in DealPOS; stock did not move."
+    elif state is None:
+        out["warning"] = (f"Adjustment {body['Number']} has no State in DealPOS's reply; check it "
+                          "with get_adjustment before assuming stock moved.")
+    elif state != "Accepted":
         out["warning"] = (f"Adjustment {body['Number']} is {state!r}, so stock has not moved "
                           "yet. Someone with the 'Adjustment - Approve' role must accept it "
                           "in DealPOS.")
