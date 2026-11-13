@@ -6,7 +6,7 @@ is no hosted service.
 
 **Read-only by default.** The 20 read tools work out of the box; 19 are called against live
 DealPOS by `tests/test_contract_live.py` (`get_pricebook` needs a pricebook name, so it is
-the one that is not). The 10 write tools are blocked until you set `DEALPOS_READ_ONLY=false`.
+the one that is not). The 9 write tools are blocked until you set `DEALPOS_READ_ONLY=false`.
 
 ## Quick start (teammates)
 
@@ -63,19 +63,19 @@ config, never in the repo.
 | `list_inventory`, `get_inventory_by_codes`, `check_low_stock` | Stock levels and low-stock list |
 | `get_inventory_log` | Stock movement history for one variant (variant code required) |
 | `list_adjustments`, `get_adjustment` | Stock adjustments and their lines. Filter by `state` (Draft, InReview, Pending, Rejected, Accepted) and `adjustment_type` (Adjust, Count); look one up by `adjustment_id`, or by `number` plus outlet. Use after `adjust_stock` to confirm the State |
-| `get_inbound_logistics` | Past PO deliveries |
+| `get_inbound_logistics` | Past PO deliveries (MF has none in DealPOS, so normally empty) |
 
-**Write (10, need `DEALPOS_READ_ONLY=false`)**
+**Write (9, need `DEALPOS_READ_ONLY=false`)**
 
 | Tool | Does |
 |------|------|
-| `create_product`, `update_product`, `update_product_price` | Add or change products and prices |
+| `create_product`, `update_product` | Add a product, or change product-level fields (`Code`, `ID`, `Variants` are refused) |
+| `update_product_price` | Change one variant's price (`variant_code` required on multi-variant products) |
 | `set_variant_weights` | Set shipping weight (grams) on variants |
 | `upsert_pricebook` | Create or update a pricebook by name |
 | `create_composite_variant`, `set_variant_composite` | Bundle variants that draw down component stock |
-| `create_customer` | Add a contact |
-| `adjust_stock` | Stock adjustment (+ add / - remove) |
-| `create_inbound_logistic` | Receive a PO delivery |
+| `create_customer` | Add a contact (pass `code`; MF's code generator is off) |
+| `adjust_stock` | Stock adjustment (+ add / - remove); returns State, and anything but Accepted means stock has not moved |
 
 ## Enabling writes
 
@@ -107,6 +107,9 @@ Keep read-only on unless you actually need to write.
 - There is no sales-order tool: DealPOS exposes `/api/v3/SalesOrder` for POST/DELETE only,
   and a POST there creates an order. Marketplace sales already show up in `get_sales_summary`.
 - Environment variables always win over a `.env` file.
+- A `.env` is read only from the checkout root, never from the folder the client starts in.
+- A network error during a write is reported as "may or may not have landed": check
+  (e.g. `list_adjustments`) before retrying, or the write can happen twice.
 
 ## Development
 
