@@ -203,8 +203,9 @@ async def list_invoices(date_from: str, date_to: str,
 
 @mcp.tool()
 async def update_product(code: str, fields: dict) -> dict:
-    """Update specific fields on a product. Pass only the fields to change.
-    Confirm changes with the user before calling."""
+    """Update product-level fields (Name, Brand, Category, Description...). Pass only the
+    fields to change; Code, ID and Variants are refused. Confirm changes with the user
+    before calling."""
     return await tools.update_product(_client, code, fields)
 
 

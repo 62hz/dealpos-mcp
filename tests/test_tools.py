@@ -613,6 +613,14 @@ async def test_update_product_price_changes_only_the_named_variant(client):
     assert v == {"MFKM5CP1-BL": 1000, "MFKM5CP1-NY": 1200}
 
 
+# --- update_product protected fields (audit finding 9) ---
+
+@pytest.mark.parametrize("field", ["Code", "ID", "Variants"])
+async def test_update_product_refuses_protected_fields(client, field):
+    with pytest.raises(DealPOSError, match=field):
+        await tools.update_product(client, "P01", {field: "x"})
+
+
 # --- get_inventory_by_codes ---
 
 @respx.mock

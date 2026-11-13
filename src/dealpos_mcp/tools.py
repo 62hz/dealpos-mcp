@@ -678,8 +678,17 @@ async def get_receivables(client: DealPOSClient, outlet: str | None = None,
 
 # --- products write (general) ---
 
+_PROTECTED_PRODUCT_FIELDS = {"Code", "ID", "Variants"}
+
+
 async def update_product(client: DealPOSClient, code: str, fields: dict) -> dict:
-    """Patch specific fields on a product. Fetches current state, merges fields, PUTs back."""
+    """Patch product-level fields (Name, Brand, Category, Description, ...). Fetches current
+    state, merges, PUTs back. Code/ID/Variants are refused: replacing Variants would
+    overwrite every variant's prices, costs and outlet prices."""
+    bad = sorted(_PROTECTED_PRODUCT_FIELDS & set(fields))
+    if bad:
+        raise DealPOSError(f"update_product won't change {bad}. Prices: update_product_price; "
+                           "weights: set_variant_weights.")
     product = await get_product(client, code)
     product.update(fields)
     return await client.request("PUT", "/api/v3/Product", json=product)
