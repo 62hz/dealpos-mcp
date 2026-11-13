@@ -43,3 +43,10 @@ def test_env_read_only_true_beats_dotenv_false(monkeypatch, tmp_path):
     monkeypatch.setenv("DEALPOS_READ_ONLY", "true")
     s = Settings(_env_file=str(env))
     assert s.read_only is True
+
+
+def test_dotenv_is_read_only_from_the_package_root():
+    """A .env in whatever folder the MCP client starts in must not be read: it could
+    carry DEALPOS_READ_ONLY=false and silently enable writes (audit 2026-11-13)."""
+    from dealpos_mcp.config import ENV_FILE, Settings
+    assert Settings.model_config["env_file"] == str(ENV_FILE)

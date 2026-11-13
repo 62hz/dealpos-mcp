@@ -7,7 +7,7 @@ ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="DEALPOS_",
-        env_file=(str(ENV_FILE), ".env"),
+        env_file=str(ENV_FILE),   # package root only; never the caller's cwd
         extra="ignore"
     )
 
