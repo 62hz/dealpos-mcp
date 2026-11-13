@@ -124,18 +124,11 @@ async def test_create_product_builds_required_body(client):
         return_value=httpx.Response(200, json={"Code": "VINYL-001"}))
     out = await tools.create_product(client, name="New Vinyl", code="VINYL-001",
                                      category="Music/Vinyl", brand="Double Deer",
-                                     unit_price=350000, unit_cost=200000, stock=20)
+                                     unit_price=350000, unit_cost=200000)
     assert out["Code"] == "VINYL-001"
     body = route.calls[0].request.content.decode()
     assert '"Name":"New Vinyl"' in body or '"Name": "New Vinyl"' in body
     assert "Variants" in body
-
-
-async def test_create_product_requires_price():
-    c = DealPOSClient(Settings(subdomain="x", client_id="a", client_secret="b"))
-    with pytest.raises(DealPOSError):
-        await tools.create_product(c, name="x", code="y", category="c", brand="b",
-                                   unit_price=None)  # type: ignore[arg-type]
 
 
 # --- update product price (plan Task 9) ---

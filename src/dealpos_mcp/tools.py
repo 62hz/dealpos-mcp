@@ -42,7 +42,7 @@ _PRODUCT_SOLD_MAX_REQUESTS = 30  # one summary may spend this many of the API's 
 
 
 async def _product_sold_chunked(client: DealPOSClient, date_from: str, date_to: str,
-                                outlet: str | None, _depth: int = 0,
+                                outlet: str | None,
                                 _left: list[int] | None = None) -> tuple[list[dict], bool]:
     """Fetch Report/ProductSold, splitting the date range around the 100-row cap.
 
@@ -76,7 +76,7 @@ async def _product_sold_chunked(client: DealPOSClient, date_from: str, date_to: 
         d1 = date.fromisoformat(date_to)
     except ValueError:
         return rows, True
-    if d0 >= d1 or _depth >= 12:
+    if d0 >= d1:
         # A single day at the cap cannot be split further.
         return rows, True
     if _left[0] < 2:
@@ -84,9 +84,9 @@ async def _product_sold_chunked(client: DealPOSClient, date_from: str, date_to: 
 
     mid = d0 + (d1 - d0) // 2
     left, t_l = await _product_sold_chunked(client, d0.isoformat(), mid.isoformat(),
-                                            outlet, _depth + 1, _left)
+                                            outlet, _left)
     right, t_r = await _product_sold_chunked(client, (mid + timedelta(days=1)).isoformat(),
-                                             d1.isoformat(), outlet, _depth + 1, _left)
+                                             d1.isoformat(), outlet, _left)
 
     merged: dict[str, dict] = {}
     for r in left + right:
@@ -201,12 +201,9 @@ async def list_products(client: DealPOSClient, name: str | None = None,
     a bare list, and ``RecordsCount`` is unreliable (-1), so pagination stops on a
     short page rather than a total count.
 
-    By default (``compact=True``) each product/variant is reduced to a whitelist of
-    fields — product: ID, Code, Category, Name, Brand, SupplierName, Released,
-    Discontinued, Variants; variant: ID, Code, Model, UnitCost, UnitPrice, Discontinued. Any other
-    field (including Description/ImageURL/ThumbnailURL, which make up most of the
-    payload size on a full-catalog pull) is dropped. Pass ``compact=False`` to get the
-    raw API objects (e.g. before calling ``update_product`` on a specific item).
+    By default (``compact=True``) each product is reduced by ``_compact_product``
+    (bulky fields such as Description/ImageURL are dropped). Pass ``compact=False`` to get
+    the raw API objects (e.g. before calling ``update_product`` on a specific item).
     """
     params = {k: v for k, v in (("Name", name), ("Category", category)) if v}
     unwrap = lambda d: d.get("DataArray", []) if isinstance(d, dict) else _rows(d)
@@ -240,15 +237,8 @@ async def get_variant_detail(client: DealPOSClient, code: str) -> dict:
 
 async def create_product(client: DealPOSClient, name: str, code: str, category: str,
                          brand: str, unit_price: float, unit_cost: float = 0,
-                         stock: float = 0, image_url: str = "",
-                         model: str = "Standard") -> dict:
-    """Create a single-variant product. unit_price is required.
-
-    Note: ``stock`` is accepted for a forward-compatible signature but opening stock
-    is set via a separate inventory adjustment endpoint (deferred), so it is not yet sent.
-    """
-    if unit_price is None:
-        raise DealPOSError("unit_price is required to create a product.")
+                         image_url: str = "", model: str = "Standard") -> dict:
+    """Create a single-variant product. unit_price is required."""
     body = {
         "Category": category, "Name": name, "Brand": brand, "Code": code,
         "Discontinued": False, "ImageURL": image_url,
