@@ -10,8 +10,7 @@ from dealpos_mcp import server  # noqa: E402
 
 WRITE_TOOLS = {"create_product", "update_product", "update_product_price",
                "set_variant_weights", "upsert_pricebook", "create_composite_variant",
-               "set_variant_composite", "create_customer", "adjust_stock",
-               "create_inbound_logistic"}
+               "set_variant_composite", "create_customer", "adjust_stock"}
 
 
 async def test_every_read_tool_has_a_live_call():
@@ -29,3 +28,9 @@ async def test_all_expected_tools_registered():
     assert {"get_sales_summary", "get_daily_sales", "check_low_stock",
             "list_products", "get_product", "create_product",
             "update_product_price", "create_customer"} <= names
+
+
+async def test_create_inbound_logistic_is_not_registered():
+    """Removed 2026-11-13: off-spec (no Number/FulfillmentOutlet) and MF has no POs."""
+    names = {t.name for t in await server.mcp.list_tools()}
+    assert "create_inbound_logistic" not in names

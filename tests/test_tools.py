@@ -1121,35 +1121,6 @@ async def test_get_inbound_logistics_date_filter(client):
     assert len(out) == 1
 
 
-# --- create_inbound_logistic ---
-
-@respx.mock
-async def test_create_inbound_logistic_payload(client):
-    _token()
-    route = respx.post(f"{BASE}/api/v3/InboundLogistic").mock(
-        return_value=httpx.Response(200, json={"ID": "il-1"}))
-    items = [{"code": "VNL-001", "qty": 10, "unit_cost": 50000}]
-    await tools.create_inbound_logistic(client, items,
-                                        supplier_code="SUP-01", notes="PO #123")
-    body = _json.loads(route.calls[0].request.content)
-    assert body["Details"][0]["Code"] == "VNL-001"
-    assert body["Details"][0]["Quantity"] == 10
-    assert body["Details"][0]["UnitCost"] == 50000
-    assert body["SupplierCode"] == "SUP-01"
-    assert body["Notes"] == "PO #123"
-
-
-@respx.mock
-async def test_create_inbound_logistic_no_supplier(client):
-    _token()
-    route = respx.post(f"{BASE}/api/v3/InboundLogistic").mock(
-        return_value=httpx.Response(200, json={"ID": "il-2"}))
-    await tools.create_inbound_logistic(client, [{"code": "X", "qty": 1}])
-    body = _json.loads(route.calls[0].request.content)
-    assert "SupplierCode" not in body
-    assert body["Details"][0]["UnitCost"] == 0
-
-
 # --- list_products compact flag ---
 
 @respx.mock

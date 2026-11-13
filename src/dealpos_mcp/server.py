@@ -262,16 +262,6 @@ async def get_inbound_logistics(date_from: str | None = None,
                                               date_to=date_to)
 
 
-@mcp.tool()
-async def create_inbound_logistic(items: list[dict], supplier_code: str | None = None,
-                                   notes: str | None = None) -> dict:
-    """Receive PO stock delivery. items: [{code, qty, unit_cost?}] — MUST be a JSON array
-    of objects, never a comma-separated string.
-    Confirm with user before calling."""
-    return await tools.create_inbound_logistic(_client, items,
-                                               supplier_code=supplier_code, notes=notes)
-
-
 def main() -> None:
     mcp.run()    # stdio transport
 
