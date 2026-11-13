@@ -123,7 +123,9 @@ async def set_variant_composite(variant_code: str, price: float, components: lis
 
 @mcp.tool()
 async def update_product_price(code: str, new_price: float, variant_code: str | None = None) -> dict:
-    """Change a product's price. Confirm the product and new price with the user first."""
+    """Change one variant's price. `code` is the PRODUCT code; `variant_code` is required
+    when the product has more than one variant (e.g. colours). Confirm the variant and
+    new price with the user first."""
     return await tools.update_product_price(_client, code, new_price, variant_code)
 
 

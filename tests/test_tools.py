@@ -585,6 +585,34 @@ async def test_update_product_merges_and_puts(client):
     assert body["Brand"] == "DD"        # existing field preserved
 
 
+# --- update_product_price multi-variant (audit finding 3) ---
+
+_KM5 = {"Code": "MFKM5CP1", "Name": "KM5 CP1", "Variants": [
+    {"Code": "MFKM5CP1-BL", "UnitPrice": 1000}, {"Code": "MFKM5CP1-NY", "UnitPrice": 1000}]}
+
+
+@respx.mock
+async def test_update_product_price_multi_variant_needs_variant_code(client):
+    _token()
+    respx.get(f"{BASE}/api/v3/Product/Code").mock(return_value=httpx.Response(200, json=_KM5))
+    put = respx.put(f"{BASE}/api/v3/Product")
+    with pytest.raises(DealPOSError, match="MFKM5CP1-BL, MFKM5CP1-NY"):
+        await tools.update_product_price(client, code="MFKM5CP1", new_price=1200)
+    assert not put.called
+
+
+@respx.mock
+async def test_update_product_price_changes_only_the_named_variant(client):
+    _token()
+    respx.get(f"{BASE}/api/v3/Product/Code").mock(
+        return_value=httpx.Response(200, json=_json.loads(_json.dumps(_KM5))))
+    put = respx.put(f"{BASE}/api/v3/Product").mock(return_value=httpx.Response(200, json={}))
+    await tools.update_product_price(client, code="MFKM5CP1", new_price=1200,
+                                     variant_code="MFKM5CP1-NY")
+    v = {x["Code"]: x["UnitPrice"] for x in _json.loads(put.calls[0].request.content)["Variants"]}
+    assert v == {"MFKM5CP1-BL": 1000, "MFKM5CP1-NY": 1200}
+
+
 # --- get_inventory_by_codes ---
 
 @respx.mock

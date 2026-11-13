@@ -436,15 +436,19 @@ async def get_pricebook(client: DealPOSClient, name: str) -> dict:
 
 async def update_product_price(client: DealPOSClient, code: str, new_price: float,
                                variant_code: str | None = None) -> dict:
-    """Reprice a product: fetch it, set the variant UnitPrice, PUT it back (update by Code)."""
+    """Reprice one variant: fetch the product, set that variant's UnitPrice, PUT it back.
+    variant_code may be omitted only when the product has a single variant."""
     product = await get_product(client, code)
     variants = product.get("Variants") or []
     if not variants:
         raise DealPOSError(f"Product {code} has no variants to reprice.")
-    target = variant_code or code
+    if variant_code is None and len(variants) > 1:
+        codes = ", ".join(str(v.get("Code")) for v in variants)
+        raise DealPOSError(f"Product {code} has {len(variants)} variants ({codes}); "
+                           "pass variant_code so only one is repriced.")
     changed = False
     for v in variants:
-        if variant_code is None or v.get("Code") == target:
+        if variant_code is None or v.get("Code") == variant_code:
             v["UnitPrice"] = new_price
             changed = True
     if not changed:
