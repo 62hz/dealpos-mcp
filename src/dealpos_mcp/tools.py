@@ -11,6 +11,30 @@ def _num(v) -> float:
         return 0.0
 
 
+def _rows(x) -> list:
+    return x if isinstance(x, list) else []
+
+
+async def _paged(client: DealPOSClient, path: str, params: dict, page_size: int,
+                 max_pages: int = 20, unwrap=_rows) -> tuple[list, bool]:
+    """GET every page until a short page. Returns (rows, truncated)."""
+    rows: list = []
+    for page in range(1, max_pages + 1):
+        batch = unwrap(await client.request(
+            "GET", path, params={**params, "PageNumber": page, "PageSize": page_size}))
+        rows.extend(batch)
+        if len(batch) < page_size:
+            return rows, False
+    return rows, True
+
+
+def _outlet(client: DealPOSClient, outlet: str | None, what: str) -> str:
+    outlet = outlet or client.s.default_outlet
+    if not outlet:
+        raise DealPOSError(f"{what} requires an outlet and DEALPOS_DEFAULT_OUTLET is unset.")
+    return outlet
+
+
 # --- sales reports ---
 
 _PRODUCT_SOLD_CAP = 100  # Report/ProductSold returns at most 100 rows and ignores paging
@@ -119,22 +143,8 @@ async def get_daily_sales(client: DealPOSClient, year: int, outlet: str | None =
 async def list_inventory(client: DealPOSClient, page_size: int = 500,
                          outlet: str | None = None, category: str | None = None) -> list[dict]:
     """Fetch all inventory rows, auto-paginating past the API's per-page cap."""
-    page_size = min(page_size, 500)
-    all_rows: list[dict] = []
-    page = 1
-    while True:
-        params: dict = {"PageNumber": page, "PageSize": page_size}
-        if outlet:
-            params["ListOutlet"] = outlet
-        if category:
-            params["Category"] = category
-        rows = await client.request("GET", "/api/v3/Inventory", params=params)
-        rows = rows if isinstance(rows, list) else []
-        all_rows.extend(rows)
-        if len(rows) < page_size:
-            break
-        page += 1
-    return all_rows
+    params = {k: v for k, v in (("ListOutlet", outlet), ("Category", category)) if v}
+    return (await _paged(client, "/api/v3/Inventory", params, min(page_size, 500)))[0]
 
 
 async def check_low_stock(client: DealPOSClient, fallback_threshold: int | None = None,
@@ -199,24 +209,11 @@ async def list_products(client: DealPOSClient, name: str | None = None,
     payload size on a full-catalog pull) is dropped. Pass ``compact=False`` to get the
     raw API objects (e.g. before calling ``update_product`` on a specific item).
     """
-    page_size = min(page_size, 500)
-    all_rows: list[dict] = []
-    page = 1
-    while True:
-        params: dict = {"PageNumber": page, "PageSize": page_size}
-        if name:
-            params["Name"] = name
-        if category:
-            params["Category"] = category
-        data = await client.request("GET", "/api/v3/Product", params=params)
-        rows = data.get("DataArray", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
-        all_rows.extend(rows)
-        if len(rows) < page_size:
-            break
-        page += 1
-    if compact:
-        all_rows = [_compact_product(p) for p in all_rows]
-    return all_rows
+    params = {k: v for k, v in (("Name", name), ("Category", category)) if v}
+    unwrap = lambda d: d.get("DataArray", []) if isinstance(d, dict) else _rows(d)
+    rows, _ = await _paged(client, "/api/v3/Product", params, min(page_size, 500),
+                           unwrap=unwrap)
+    return [_compact_product(p) for p in rows] if compact else rows
 
 
 async def get_product(client: DealPOSClient, code: str) -> dict:
@@ -888,11 +885,6 @@ async def adjust_stock(client: DealPOSClient, items: list[dict],
 async def get_inbound_logistics(client: DealPOSClient, date_from: str | None = None,
                                 date_to: str | None = None,
                                 page_size: int = 50) -> list[dict]:
-    """List incoming PO deliveries."""
-    params: dict = {"PageNumber": 1, "PageSize": page_size}
-    if date_from:
-        params["From"] = date_from
-    if date_to:
-        params["To"] = date_to
-    rows = await client.request("GET", "/api/v3/InboundLogistic", params=params)
-    return rows if isinstance(rows, list) else []
+    """List past PO deliveries (paged). MF has no POs in DealPOS, so this is usually empty."""
+    params = {k: v for k, v in (("From", date_from), ("To", date_to)) if v}
+    return (await _paged(client, "/api/v3/InboundLogistic", params, page_size))[0]

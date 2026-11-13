@@ -1238,6 +1238,16 @@ async def test_get_inbound_logistics_date_filter(client):
     assert len(out) == 1
 
 
+@respx.mock
+async def test_get_inbound_logistics_pages(client):
+    _token()
+    route = respx.get(f"{BASE}/api/v3/InboundLogistic").mock(side_effect=[
+        httpx.Response(200, json=[{"ID": i} for i in range(50)]),
+        httpx.Response(200, json=[{"ID": "last"}])])
+    out = await tools.get_inbound_logistics(client)
+    assert len(out) == 51 and route.call_count == 2
+
+
 # --- list_products compact flag ---
 
 @respx.mock
