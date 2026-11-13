@@ -1,10 +1,16 @@
 import asyncio
 import collections
 import time
+from importlib.metadata import PackageNotFoundError, version
 
 import httpx
 
 from .config import Settings
+
+try:
+    USER_AGENT = f"dealpos-mcp/{version('dealpos-mcp')}"
+except PackageNotFoundError:  # run from a bare source tree
+    USER_AGENT = "dealpos-mcp/unknown"
 
 
 class DealPOSError(Exception):
@@ -45,7 +51,8 @@ class DealPOSClient:
         self.s = settings
         self._token: str | None = None
         self._token_expiry: float = 0.0
-        self._http = httpx.AsyncClient(base_url=settings.base_url, timeout=30.0)
+        self._http = httpx.AsyncClient(base_url=settings.base_url, timeout=30.0,
+                                       headers={"User-Agent": USER_AGENT})
         self._limiter = _SlidingWindow(settings.rate_permits, settings.rate_window)
 
     async def _get_token(self) -> str:

@@ -176,3 +176,15 @@ async def test_non_json_success_body_is_returned_as_text(client):
     respx.post("https://doubledeer.dealpos.co.id/api/v3/Product").mock(
         return_value=httpx.Response(200, text="Success"))
     assert await client.request("POST", "/api/v3/Product", json={}) == "Success"
+
+
+@respx.mock
+async def test_every_call_identifies_the_app_in_user_agent(client):
+    """DealPOS will reject calls without an identifying User-Agent from 2027."""
+    token = respx.post("https://doubledeer.dealpos.co.id/api/v3/Token/OAuth2").mock(
+        return_value=httpx.Response(200, json={"access_token": "tok", "expires_in": 1000}))
+    api = respx.get("https://doubledeer.dealpos.co.id/api/v3/Inventory").mock(
+        return_value=httpx.Response(200, json=[]))
+    await client.request("GET", "/api/v3/Inventory")
+    for route in (token, api):
+        assert route.calls[0].request.headers["user-agent"].startswith("dealpos-mcp/")

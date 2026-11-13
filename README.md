@@ -4,6 +4,11 @@ Local [MCP](https://modelcontextprotocol.io) server that lets Claude read (and, 
 allow it, write) DealPOS data for Medium Format. Runs on your machine over stdio; there
 is no hosted service.
 
+**Unofficial.** This is an independent project. It is not made, endorsed or supported by
+DealPOS (PT Generasi Inspirasi Informatika), which publishes its own MCP server at
+`mcp.dealpos.app`. This one talks to the public DealPOS REST API v3 with your own client
+credentials. "DealPOS" belongs to its owner.
+
 **Read-only by default.** The 20 read tools work out of the box; 19 are called against live
 DealPOS by `tests/test_contract_live.py` (`get_pricebook` needs a pricebook name, so it is
 the one that is not). The 10 write tools are blocked until you set `DEALPOS_READ_ONLY=false`.
@@ -100,6 +105,8 @@ Keep read-only on unless you actually need to write.
   server paces itself to 45 per 180 s (`DEALPOS_RATE_PERMITS`, `DEALPOS_RATE_WINDOW`; set
   permits to `0` to turn it off), so a heavy read can pause until the window clears instead
   of failing. A call that looks hung is usually waiting for that.
+- Every request sends `User-Agent: dealpos-mcp/<version>`. DealPOS says it will require an
+  identifying User-Agent from 2027 and answer 400 without one.
 - `get_sales_summary` spends at most 30 requests on one range. A full year took 23 live; if a
   range needs more, the result carries `truncated` and a warning, so ask for a shorter range.
 - `get_inventory_log` takes one variant code (required); there is no all-variants log.
@@ -136,3 +143,7 @@ checkout root.
 - **This repo:** interactive MCP control (stdio).
 - **Separate:** Google Apps Script for scheduled reports and low-stock alerts.
 - **Later:** returns, supplier and purchase orders, as new tools.
+
+## Licence
+
+MIT, see [LICENSE](LICENSE).
