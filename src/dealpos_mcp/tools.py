@@ -143,7 +143,8 @@ async def list_inventory(client: DealPOSClient, page_size: int = 500,
                          outlet: str | None = None, category: str | None = None) -> list[dict]:
     """Fetch all inventory rows, auto-paginating past the API's per-page cap."""
     params = {k: v for k, v in (("ListOutlet", outlet), ("Category", category)) if v}
-    return (await _paged(client, "/api/v3/Inventory", params, min(page_size, 500)))[0]
+    return (await _paged(client, "/api/v3/Inventory", params, min(page_size, 500),
+                         max_pages=100))[0]
 
 
 async def check_low_stock(client: DealPOSClient, fallback_threshold: int | None = None,
@@ -416,6 +417,7 @@ async def update_product_price(client: DealPOSClient, code: str, new_price: floa
                                variant_code: str | None = None) -> dict:
     """Reprice one variant: fetch the product, set that variant's UnitPrice, PUT it back.
     variant_code may be omitted only when the product has a single variant."""
+    variant_code = variant_code or None  # "" means none
     product = await get_product(client, code)
     variants = product.get("Variants") or []
     if not variants:
@@ -642,14 +644,16 @@ async def get_receivables(client: DealPOSClient, outlet: str | None = None,
 
 # --- products write (general) ---
 
-_PROTECTED_PRODUCT_FIELDS = {"Code", "ID", "Variants"}
+_PROTECTED_PRODUCT_FIELDS = {"code", "id", "variants"}  # compared case-insensitively
 
 
 async def update_product(client: DealPOSClient, code: str, fields: dict) -> dict:
     """Patch product-level fields (Name, Brand, Category, Description, ...). Fetches current
     state, merges, PUTs back. Code/ID/Variants are refused: replacing Variants would
     overwrite every variant's prices, costs and outlet prices."""
-    bad = sorted(_PROTECTED_PRODUCT_FIELDS & set(fields))
+    if not isinstance(fields, dict):
+        raise DealPOSError("update_product fields must be an object of field names to values.")
+    bad = sorted(k for k in fields if str(k).casefold() in _PROTECTED_PRODUCT_FIELDS)
     if bad:
         raise DealPOSError(f"update_product won't change {bad}. Prices: update_product_price; "
                            "weights: set_variant_weights.")

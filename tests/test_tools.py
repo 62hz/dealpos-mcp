@@ -608,10 +608,39 @@ async def test_update_product_price_changes_only_the_named_variant(client):
 
 # --- update_product protected fields (audit finding 9) ---
 
-@pytest.mark.parametrize("field", ["Code", "ID", "Variants"])
+@pytest.mark.parametrize("field", ["Code", "ID", "Variants", "variants", "code", "Id"])
 async def test_update_product_refuses_protected_fields(client, field):
     with pytest.raises(DealPOSError, match=rf"won't change \['{field}'\]"):
         await tools.update_product(client, "P01", {field: "x"})
+
+
+async def test_update_product_rejects_non_dict_fields(client):
+    with pytest.raises(DealPOSError, match="object"):
+        await tools.update_product(client, "P01", "Name=x")
+
+
+_ONE = {"Code": "SOLO", "Name": "Solo", "Variants": [{"Code": "SOLO-1", "UnitPrice": 1000}]}
+
+
+@respx.mock
+async def test_update_product_price_empty_variant_code_means_none(client):
+    _token()
+    respx.get(f"{BASE}/api/v3/Product/Code").mock(
+        return_value=httpx.Response(200, json=_json.loads(_json.dumps(_ONE))))
+    put = respx.put(f"{BASE}/api/v3/Product").mock(return_value=httpx.Response(200, json={}))
+    await tools.update_product_price(client, code="SOLO", new_price=1500, variant_code="")
+    assert _json.loads(put.calls[0].request.content)["Variants"][0]["UnitPrice"] == 1500
+
+
+@respx.mock
+async def test_update_product_price_single_variant_wrong_code_is_not_found(client):
+    _token()
+    respx.get(f"{BASE}/api/v3/Product/Code").mock(
+        return_value=httpx.Response(200, json=_json.loads(_json.dumps(_ONE))))
+    put = respx.put(f"{BASE}/api/v3/Product")
+    with pytest.raises(DealPOSError, match="not found"):
+        await tools.update_product_price(client, code="SOLO", new_price=1500, variant_code="NOPE")
+    assert not put.called
 
 
 # --- create_customer with the code generator off (audit finding 2) ---
