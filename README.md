@@ -76,7 +76,7 @@ config, never in the repo.
 | `create_composite_variant`, `set_variant_composite` | Bundle variants that draw down component stock |
 | `create_customer` | Add a contact (pass `code`; MF's code generator is off) |
 | `adjust_stock` | Stock adjustment (+ add / - remove); returns State. With MF's approval workflow it lands as Draft (stock unmoved) unless `auto_approve=true` |
-| `reject_adjustment` | Reject a Draft/InReview adjustment by Number (stock unchanged) |
+| `reject_adjustment` | Reject a **Pending** adjustment by Number (stock unchanged). A Draft is refused (400 "not in Pending State", live 2026-11-13): clear a Draft in the DealPOS UI. InReview untested |
 
 ## Enabling writes
 

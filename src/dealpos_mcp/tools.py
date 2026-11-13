@@ -854,8 +854,9 @@ async def adjust_stock(client: DealPOSClient, items: list[dict],
 
 async def reject_adjustment(client: DealPOSClient, number: str,
                             outlet: str | None = None) -> dict:
-    """Reject a Draft/InReview adjustment (PUT /api/v3/Adjustment/Reject). Stock is not
-    moved; the adjustment stays in the log as Rejected. Needs the approval role."""
+    """Reject a Pending adjustment (PUT /api/v3/Adjustment/Reject). Stock is not moved;
+    the adjustment stays in the log as Rejected. Needs the approval role. Live
+    2026-11-13: a Draft answers 400 "not in Pending State"; InReview is untested."""
     body = {"Outlet": _outlet(client, outlet, "Rejecting an adjustment"), "Number": number}
     return await client.request("PUT", "/api/v3/Adjustment/Reject", json=body)
 

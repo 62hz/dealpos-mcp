@@ -266,9 +266,10 @@ async def adjust_stock(items: list[dict], notes: str | None = None,
 
 @mcp.tool()
 async def reject_adjustment(number: str, outlet: str | None = None) -> dict:
-    """Reject a Draft or InReview stock adjustment by its Number (default outlet unless
-    given). Stock does not move; it stays in the log as Rejected. Confirm with the
-    user before calling."""
+    """Reject a Pending stock adjustment by its Number (default outlet unless given).
+    Stock does not move; it stays in the log as Rejected. A Draft is refused by
+    DealPOS (400 "not in Pending State"); clear a Draft in the DealPOS UI. InReview is
+    untested. Confirm with the user before calling."""
     return await tools.reject_adjustment(_client, number, outlet=outlet)
 
 
