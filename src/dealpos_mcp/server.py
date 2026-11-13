@@ -130,9 +130,11 @@ async def update_product_price(code: str, new_price: float, variant_code: str | 
 
 
 @mcp.tool()
-async def create_customer(name: str, email: str, mobile_phone: str) -> dict:
-    """Create a customer/contact."""
-    return await tools.create_customer(_client, name, email, mobile_phone)
+async def create_customer(name: str, email: str = "", mobile_phone: str = "",
+                          code: str | None = None) -> dict:
+    """Create a customer/contact. Pass `code` (MF's DealPOS has its code generator off);
+    email and phone are optional. Confirm details with the user before calling."""
+    return await tools.create_customer(_client, name, email, mobile_phone, code=code)
 
 
 @mcp.tool()

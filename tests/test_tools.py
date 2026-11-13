@@ -621,6 +621,29 @@ async def test_update_product_refuses_protected_fields(client, field):
         await tools.update_product(client, "P01", {field: "x"})
 
 
+# --- create_customer with the code generator off (audit finding 2) ---
+
+@respx.mock
+async def test_create_customer_with_code_skips_newcode(client):
+    _token()
+    newcode = respx.get(f"{BASE}/api/v3/Customer/NewCode")
+    route = respx.post(f"{BASE}/api/v3/Customer").mock(
+        return_value=httpx.Response(200, json={"Code": "USS-JCC"}))
+    await tools.create_customer(client, name="USS JCC", code="USS-JCC")
+    assert not newcode.called
+    body = _json.loads(route.calls[0].request.content)
+    assert body["Code"] == "USS-JCC" and body["Email"] == "" and body["MobilePhone"] == ""
+
+
+@respx.mock
+async def test_create_customer_generator_off_says_pass_code(client):
+    _token()
+    respx.get(f"{BASE}/api/v3/Customer/NewCode").mock(
+        return_value=httpx.Response(400, json={"Message": "turn on Customer Code Generator"}))
+    with pytest.raises(DealPOSError, match="Pass code="):
+        await tools.create_customer(client, name="USS JCC")
+
+
 # --- get_inventory_by_codes ---
 
 @respx.mock

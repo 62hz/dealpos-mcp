@@ -458,12 +458,19 @@ async def update_product_price(client: DealPOSClient, code: str, new_price: floa
 
 # --- customers write ---
 
-async def create_customer(client: DealPOSClient, name: str, email: str,
-                          mobile_phone: str, code: str | None = None) -> dict:
-    """Create a customer. Required by the API: ID, Code, Email, MobilePhone, Name, Status."""
+async def create_customer(client: DealPOSClient, name: str, email: str = "",
+                          mobile_phone: str = "", code: str | None = None) -> dict:
+    """Create a customer. Without `code`, DealPOS's NewCode generator is asked for one;
+    MF has that generator off, so pass `code` (e.g. the event or company name)."""
     if not code:
-        nc = await client.request("GET", "/api/v3/Customer/NewCode")
-        code = nc.get("Code") if isinstance(nc, dict) else str(nc)
+        try:
+            nc = await client.request("GET", "/api/v3/Customer/NewCode")
+        except DealPOSError as e:
+            raise DealPOSError("DealPOS could not generate a customer code (Customer Code "
+                               f"Generator is off?). Pass code= explicitly. ({e})") from e
+        code = nc.get("Code") if isinstance(nc, dict) else str(nc or "")
+        if not code:
+            raise DealPOSError("DealPOS returned no customer code. Pass code= explicitly.")
     body = {"ID": "", "Code": code, "Email": email, "MobilePhone": mobile_phone,
             "Name": name, "Status": "Active"}
     return await client.request("POST", "/api/v3/Customer", json=body)
