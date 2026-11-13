@@ -10,7 +10,8 @@ from dealpos_mcp import server  # noqa: E402
 
 WRITE_TOOLS = {"create_product", "update_product", "update_product_price",
                "set_variant_weights", "upsert_pricebook", "create_composite_variant",
-               "set_variant_composite", "create_customer", "adjust_stock"}
+               "set_variant_composite", "create_customer", "adjust_stock",
+               "reject_adjustment"}
 
 
 async def test_every_read_tool_has_a_live_call():

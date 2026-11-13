@@ -6,7 +6,7 @@ is no hosted service.
 
 **Read-only by default.** The 20 read tools work out of the box; 19 are called against live
 DealPOS by `tests/test_contract_live.py` (`get_pricebook` needs a pricebook name, so it is
-the one that is not). The 9 write tools are blocked until you set `DEALPOS_READ_ONLY=false`.
+the one that is not). The 10 write tools are blocked until you set `DEALPOS_READ_ONLY=false`.
 
 ## Quick start (teammates)
 
@@ -65,7 +65,7 @@ config, never in the repo.
 | `list_adjustments`, `get_adjustment` | Stock adjustments and their lines. Filter by `state` (Draft, InReview, Pending, Rejected, Accepted) and `adjustment_type` (Adjust, Count); look one up by `adjustment_id`, or by `number` plus outlet. Use after `adjust_stock` to confirm the State |
 | `get_inbound_logistics` | Past PO deliveries (MF has none in DealPOS, so normally empty) |
 
-**Write (9, need `DEALPOS_READ_ONLY=false`)**
+**Write (10, need `DEALPOS_READ_ONLY=false`)**
 
 | Tool | Does |
 |------|------|
@@ -75,7 +75,8 @@ config, never in the repo.
 | `upsert_pricebook` | Create or update a pricebook by name |
 | `create_composite_variant`, `set_variant_composite` | Bundle variants that draw down component stock |
 | `create_customer` | Add a contact (pass `code`; MF's code generator is off) |
-| `adjust_stock` | Stock adjustment (+ add / - remove); returns State, and anything but Accepted means stock has not moved |
+| `adjust_stock` | Stock adjustment (+ add / - remove); returns State. With MF's approval workflow it lands as Draft (stock unmoved) unless `auto_approve=true` |
+| `reject_adjustment` | Reject a Draft/InReview adjustment by Number (stock unchanged) |
 
 ## Enabling writes
 

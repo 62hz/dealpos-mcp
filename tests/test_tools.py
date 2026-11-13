@@ -843,6 +843,29 @@ async def test_adjust_stock_payload(client):
     assert body["Variants"][0]["Note"] == "Restock"
     assert body["Note"] == "Weekly restock"
     assert "Date" in body
+    assert "Auto-Approve" not in route.calls[0].request.headers  # Draft unless asked
+
+
+@respx.mock
+async def test_adjust_stock_auto_approve_sends_header(client):
+    """Live 2026-11-13: an API adjustment lands as Draft (stock unmoved). The spec's
+    Auto-Approve header makes DealPOS accept it on create."""
+    _token(); _adj_readback()
+    route = respx.post(f"{BASE}/api/v3/Adjustment").mock(
+        return_value=httpx.Response(200, json={"ID": "adj-1"}))
+    await tools.adjust_stock(client, [{"code": "A", "qty": 1}], auto_approve=True)
+    assert route.calls[0].request.headers["Auto-Approve"] == "true"
+    assert route.calls[0].request.headers["Authorization"].startswith("Bearer ")
+
+
+@respx.mock
+async def test_reject_adjustment_puts_outlet_and_number(client):
+    _token()
+    route = respx.put(f"{BASE}/api/v3/Adjustment/Reject").mock(
+        return_value=httpx.Response(200, json={"Message": "Rejected"}))
+    await tools.reject_adjustment(client, "ADJ-1")
+    assert _json.loads(route.calls[0].request.content) == {"Outlet": "MF Store",
+                                                           "Number": "ADJ-1"}
 
 
 @respx.mock

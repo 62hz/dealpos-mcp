@@ -250,15 +250,26 @@ async def get_adjustment(adjustment_id: str | None = None, number: str | None = 
 
 @mcp.tool()
 async def adjust_stock(items: list[dict], notes: str | None = None,
-                       reference: str | None = None) -> dict:
+                       reference: str | None = None, auto_approve: bool = False) -> dict:
     """Create a stock adjustment at the default outlet. items: [{code, qty, reason?}] —
     MUST be a JSON array of objects, never a comma-separated string. code = VARIANT code;
     qty = non-zero whole number (+ add, - remove); each code once. reference = optional
     adjustment Number (auto-generated otherwise). Returns the adjustment's State and, when
     it is anything but Accepted or the read-back failed, a `warning` key: stock has NOT
-    moved yet (or is unconfirmed) and the call must not be retried blindly. Confirm
-    quantities with the user first."""
-    return await tools.adjust_stock(_client, items, notes=notes, reference=reference)
+    moved yet (or is unconfirmed) and the call must not be retried blindly.
+    MF's approval workflow makes API adjustments Draft (stock unmoved) by default;
+    auto_approve=true accepts it on create, so stock moves at once; use it only when
+    the user asked for that. Confirm quantities with the user first."""
+    return await tools.adjust_stock(_client, items, notes=notes, reference=reference,
+                                    auto_approve=auto_approve)
+
+
+@mcp.tool()
+async def reject_adjustment(number: str, outlet: str | None = None) -> dict:
+    """Reject a Draft or InReview stock adjustment by its Number (default outlet unless
+    given). Stock does not move; it stays in the log as Rejected. Confirm with the
+    user before calling."""
+    return await tools.reject_adjustment(_client, number, outlet=outlet)
 
 
 @mcp.tool()

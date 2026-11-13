@@ -783,11 +783,16 @@ def _check_adjust_items(items: list[dict]) -> list[dict]:
 
 
 async def adjust_stock(client: DealPOSClient, items: list[dict],
-                       notes: str | None = None, reference: str | None = None) -> dict:
+                       notes: str | None = None, reference: str | None = None,
+                       auto_approve: bool = False) -> dict:
     """Delta stock adjustment ("Create Adjustment by Adjusting Differences" —
     POST /api/v3/Adjustment). Each item: {code, qty, reason?}.
     Positive qty = add stock; negative = remove stock. Items are validated before any
     call, and the returned dict carries the read-back `State`.
+
+    Live 2026-11-13: with MF's approval workflow on, an API adjustment lands as Draft
+    and stock does not move. auto_approve=True sends the spec's `Auto-Approve: true`
+    header so DealPOS accepts it on create (the API user needs the approval role).
 
     Verified live against https://developer.dealpos.com/openapi/openapi/inventory-adjustment/createadjustmentbyadjustingdifferences.md
     on 2026-08-11. The earlier version of this function sent "Details" and "Notes" —
@@ -817,7 +822,8 @@ async def adjust_stock(client: DealPOSClient, items: list[dict],
     }
     if notes:
         body["Note"] = notes
-    resp = await client.request("POST", "/api/v3/Adjustment", json=body)
+    resp = await client.request("POST", "/api/v3/Adjustment", json=body,
+                                headers={"Auto-Approve": "true"} if auto_approve else None)
     out = dict(resp) if isinstance(resp, dict) else {"response": resp}
     out["Number"] = body["Number"]
     adj_id = out.get("ID")
@@ -844,6 +850,14 @@ async def adjust_stock(client: DealPOSClient, items: list[dict],
                           "yet. Someone with the 'Adjustment - Approve' role must accept it "
                           "in DealPOS.")
     return out
+
+
+async def reject_adjustment(client: DealPOSClient, number: str,
+                            outlet: str | None = None) -> dict:
+    """Reject a Draft/InReview adjustment (PUT /api/v3/Adjustment/Reject). Stock is not
+    moved; the adjustment stays in the log as Rejected. Needs the approval role."""
+    body = {"Outlet": _outlet(client, outlet, "Rejecting an adjustment"), "Number": number}
+    return await client.request("PUT", "/api/v3/Adjustment/Reject", json=body)
 
 
 # --- logistics ---

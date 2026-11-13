@@ -68,7 +68,8 @@ class DealPOSClient:
         return self._token
 
     async def request(self, method: str, path: str, *, params: dict | None = None,
-                      json: dict | None = None, _max_retries: int = 3):
+                      json: dict | None = None, headers: dict | None = None,
+                      _max_retries: int = 3):
         if self.s.read_only and method.upper() != "GET" and path not in _READ_ONLY_POSTS:
             raise DealPOSError(
                 f"Read-only mode: {method.upper()} {path} writes to DealPOS and was blocked. "
@@ -78,7 +79,8 @@ class DealPOSClient:
             await self._limiter.acquire()
             try:
                 r = await self._http.request(method, path, params=params, json=json,
-                                             headers={"Authorization": f"Bearer {token}"})
+                                             headers={**(headers or {}),
+                                                      "Authorization": f"Bearer {token}"})
             except httpx.TransportError as e:
                 if method.upper() == "GET":
                     raise DealPOSError(f"Network error talking to DealPOS "
