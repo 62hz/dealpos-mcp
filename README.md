@@ -104,6 +104,8 @@ Keep read-only on unless you actually need to write.
 - `get_inventory_log` takes one variant code (required); there is no all-variants log.
 - `list_customers` filters by name on the server; email and phone are matched by the tool
   after fetching, because DealPOS ignores those two filters.
+- There is no sales-order tool: DealPOS exposes `/api/v3/SalesOrder` for POST/DELETE only,
+  and a POST there creates an order. Marketplace sales already show up in `get_sales_summary`.
 - Environment variables always win over a `.env` file.
 
 ## Development

@@ -625,29 +625,6 @@ async def list_invoices(client: DealPOSClient, date_from: str, date_to: str,
     return out
 
 
-async def list_sales_orders(client: DealPOSClient, date_from: str | None = None,
-                            date_to: str | None = None, status: str | None = None,
-                            outlet: str | None = None, page_size: int = 50) -> list[dict]:
-    """List sales orders (online/marketplace orders)."""
-    # NOT IMPLEMENTED — deliberately.
-    #
-    # /api/v3/SalesOrder answers OPTIONS with "Allow: DELETE, POST" only; every
-    # GET variant probed on 2026-08-02 (bare, /List, /Search, /WithTotalCount,
-    # /ID, /Count, /Join, /SalesOrders, /Order, /OnlineOrder) returned 404 or 405.
-    # Per the DealPOS docs every SalesOrder operation is a POST, and POST to the
-    # bare path CREATES a sales order — so it was not probed.
-    #
-    # This is not a gap in practice: marketplace/online sales DO appear in
-    # Report/ProductSold. Verified 2026-08-02 — a TikTok sale (barcode
-    # 371156899, Rp270.000) is present there, and ProductSold reconciles exactly
-    # with Report/DailySales for the same month.
-    raise DealPOSError(
-        "list_sales_orders is not available: DealPOS exposes /api/v3/SalesOrder "
-        "for POST/DELETE only, and POST to that path creates an order. "
-        "Use get_sales_summary() instead — it already includes marketplace sales."
-    )
-
-
 def _due_date(raw) -> "date | None":
     """Invoice `Due` as a date, or None. DealPOS uses 0001-01-01 for 'no due date'."""
     try:

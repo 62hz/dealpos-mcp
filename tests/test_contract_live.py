@@ -212,10 +212,3 @@ async def test_adjustment_reads_agree_and_number_needs_outlet(live):
     assert "ImageUrl" not in by_id["AdjustedInventory"][0]
     with pytest.raises(DealPOSError, match="not be found"):  # why get_adjustment demands an outlet
         await live.request("GET", "/api/v3/Adjustment/Detail", params={"Number": r["Number"]})
-
-
-async def test_sales_orders_is_explicitly_unavailable(live):
-    """Pinned deliberately: if DealPOS ever adds a GET, this fails and we revisit."""
-    from dealpos_mcp.client import DealPOSError
-    with pytest.raises(DealPOSError, match="not available"):
-        await tools.list_sales_orders(live)

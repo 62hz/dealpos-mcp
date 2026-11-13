@@ -499,14 +499,6 @@ async def test_list_invoices_unknown_outlet_raises(client):
                                   outlet="Nonexistent Outlet")
 
 
-# --- list_sales_orders ---
-
-async def test_list_sales_orders_raises_not_available(client):
-    """DealPOS exposes /SalesOrder for POST/DELETE only; POST there CREATES an order."""
-    with pytest.raises(DealPOSError, match="not available"):
-        await tools.list_sales_orders(client)
-
-
 # --- get_receivables ---
 
 def _recv_rows(overdue, recent):
