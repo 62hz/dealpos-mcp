@@ -1,0 +1,19 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --frozen --extra dev
+      # Mocked tests only. tests/test_contract_live.py skips without DEALPOS_LIVE_CONTRACT,
+      # and no DealPOS credentials exist in CI.
+      - run: uv run pytest -q

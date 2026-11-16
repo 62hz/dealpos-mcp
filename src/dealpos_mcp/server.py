@@ -202,6 +202,17 @@ async def list_invoices(date_from: str, date_to: str,
 
 
 @mcp.tool()
+async def get_invoice_detail(invoice_id: str | None = None, number: str | None = None,
+                             outlet: str | None = None) -> dict:
+    """One invoice with its line items (variant Code, Name, Quantity, Price, discounts,
+    Sales). Pass invoice_id (from list_invoices), or number together with its outlet name.
+    Use it to see what was actually sold on an invoice; list_invoices has headers only.
+    Customer comes back as Code and Name only."""
+    return await tools.get_invoice_detail(_client, number=number, invoice_id=invoice_id,
+                                          outlet=outlet)
+
+
+@mcp.tool()
 async def update_product(code: str, fields: dict) -> dict:
     """Update product-level fields (Name, Brand, Category, Description...). Pass only the
     fields to change; Code, ID and Variants are refused. Confirm changes with the user

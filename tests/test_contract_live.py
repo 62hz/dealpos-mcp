@@ -88,6 +88,7 @@ READS = {
     "get_inbound_logistics": lambda c, s: tools.get_inbound_logistics(c, *WINDOW),
     "list_adjustments": lambda c, s: tools.list_adjustments(c, "2026-10-01", "2026-10-31"),
     "get_adjustment": lambda c, s: tools.get_adjustment(c, adjustment_id=s["adjustment_id"]),
+    "get_invoice_detail": lambda c, s: tools.get_invoice_detail(c, invoice_id=s["invoice_id"]),
 }
 
 
@@ -105,7 +106,9 @@ async def test_every_read_tool_succeeds_live(live):
     adjs = (await tools.list_adjustments(live, "2026-01-01", "2026-12-31"))["adjustments"]
     assert adjs, "no adjustments this year; cannot pick a sample for get_adjustment"
     sample = {"product": p["Code"], "variant": p["Variants"][0]["Code"],
-              "adjustment_id": adjs[0]["ID"]}
+              "adjustment_id": adjs[0]["ID"],
+              "invoice_id": (await tools.list_invoices(live, "2026-06-05", "2026-06-05"))
+              ["invoices"][0]["ID"]}
 
     failures = []
     for name in sorted(READS):
@@ -212,3 +215,17 @@ async def test_adjustment_reads_agree_and_number_needs_outlet(live):
     assert "ImageUrl" not in by_id["AdjustedInventory"][0]
     with pytest.raises(DealPOSError, match="not be found"):  # why get_adjustment demands an outlet
         await live.request("GET", "/api/v3/Adjustment/Detail", params={"Number": r["Number"]})
+
+
+async def test_invoice_detail_lines_agree_with_the_header(live):
+    """2026-06-05 is a known day (16 invoices). The detail of each of its first two must
+    carry lines whose Sales sum to the list row's Amount, by ID and by Number+Outlet."""
+    rows = (await tools.list_invoices(live, "2026-06-05", "2026-06-05"))["invoices"][:2]
+    for row in rows:
+        by_id = await tools.get_invoice_detail(live, invoice_id=row["ID"])
+        by_number = await tools.get_invoice_detail(live, number=row["Number"],
+                                                   outlet=by_id["Outlet"])
+        assert by_number["ID"] == row["ID"]
+        assert by_id["Variants"], f"{row['Number']} came back with no lines"
+        assert set(by_id["Customer"] or {}) <= {"Code", "Name"}
+        assert sum(float(v.get("Sales") or 0) for v in by_id["Variants"]) == float(row["Amount"])

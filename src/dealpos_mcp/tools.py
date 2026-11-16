@@ -663,7 +663,9 @@ async def update_product(client: DealPOSClient, code: str, fields: dict) -> dict
         raise DealPOSError(f"update_product won't change {bad}. Prices: update_product_price; "
                            "weights: set_variant_weights.")
     product = await get_product(client, code)
-    product.update(fields)
+    # 'description' must land on 'Description', not ride along as a second JSON key.
+    keys = {k.casefold(): k for k in product}
+    product.update({keys.get(str(k).casefold(), k): v for k, v in fields.items()})
     return await client.request("PUT", "/api/v3/Product", json=product)
 
 
@@ -755,6 +757,33 @@ async def get_adjustment(client: DealPOSClient, number: str | None = None,
                         for line in adj.get(key) or []]
     return adj
 
+
+_INVOICE_LINE_NOISE = ("VariantID", "ThumbnailURL")
+
+
+async def get_invoice_detail(client: DealPOSClient, number: str | None = None,
+                             invoice_id: str | None = None,
+                             outlet: str | None = None) -> dict:
+    """One invoice with its lines (Variants: Code, Name, Quantity, Price, PriceOriginal,
+    Discount, DiscountAmount, Sales, Cost, Note ...) plus header totals and Payment.
+
+    Give `invoice_id` (the ID on a list_invoices row), or `number` plus its outlet, which
+    falls back to DEALPOS_DEFAULT_OUTLET (as with get_adjustment). Customer is cut to Code
+    and Name: email and phone stay in DealPOS (list_customers has them if really needed).
+    """
+    if bool(number) == bool(invoice_id):
+        raise DealPOSError("get_invoice_detail needs exactly one of number or invoice_id.")
+    if invoice_id:
+        params: dict = {"ID": invoice_id}
+    else:
+        params = {"Number": number, "Outlet": _outlet(client, outlet, "Looking up an invoice by number")}
+    inv = await client.request("GET", "/api/v3/Invoice/Detail", params=params)
+    if isinstance(inv, dict):
+        if isinstance(inv.get("Customer"), dict):
+            inv["Customer"] = {k: inv["Customer"].get(k) for k in ("Code", "Name")}
+        inv["Variants"] = [{k: v for k, v in line.items() if k not in _INVOICE_LINE_NOISE}
+                           for line in inv.get("Variants") or []]
+    return inv
 
 # --- stock adjustment ---
 

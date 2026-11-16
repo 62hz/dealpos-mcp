@@ -1420,3 +1420,74 @@ async def test_list_products_compact_false_returns_raw(client):
     out = await tools.list_products(client, compact=False)
     assert out[0]["Description"] == "full description"
     assert out[0]["Variants"][0]["Description"] == "variant desc"
+
+
+# --- mf-dealpos-input contract (2026-11-16): Description/Brand via update_product ---
+
+_P02 = {"Code": "P02", "Name": "CD A - B", "Category": "Music/CD", "Brand": "",
+        "Description": "old", "Discontinued": False,
+        "Variants": [{"Code": "P02-1", "UnitPrice": 300000}]}
+
+
+@respx.mock
+async def test_update_product_sends_description_and_brand_only(client):
+    """mf-dealpos-input sends {"Description", "Brand"}; everything else must go back as read."""
+    _token()
+    respx.get(f"{BASE}/api/v3/Product/Code").mock(return_value=httpx.Response(200, json=_P02))
+    route = respx.put(f"{BASE}/api/v3/Product").mock(
+        return_value=httpx.Response(200, json={"Code": "P02"}))
+    await tools.update_product(client, "P02", {"Description": "new", "Brand": "Label X"})
+    body = _json.loads(route.calls[0].request.content)
+    assert body == {**_P02, "Description": "new", "Brand": "Label X"}
+
+
+@respx.mock
+async def test_update_product_field_case_lands_on_existing_key(client):
+    """'description' must replace 'Description', not add a second key that DealPOS may
+    resolve either way."""
+    _token()
+    respx.get(f"{BASE}/api/v3/Product/Code").mock(return_value=httpx.Response(200, json=_P02))
+    route = respx.put(f"{BASE}/api/v3/Product").mock(
+        return_value=httpx.Response(200, json={"Code": "P02"}))
+    await tools.update_product(client, "P02", {"description": "new"})
+    body = _json.loads(route.calls[0].request.content)
+    assert body["Description"] == "new"
+    assert "description" not in body
+
+
+# --- get_invoice_detail (plan Task 9, 2026-11-16) ---
+
+_INV = {"ID": "inv-1", "Number": "BC.1", "Outlet": "Main Store", "SalesNTax": 350000,
+        "Customer": {"Code": "C1", "Name": "Rian", "Email": "rian@example.com",
+                     "Mobile": "0812", "Phone": "021"},
+        "Variants": [{"VariantID": "v-1", "Code": "SKU1", "Name": "CD A", "Quantity": 1,
+                      "Price": 350000, "ThumbnailURL": "https://img"}]}
+
+
+@respx.mock
+async def test_get_invoice_detail_by_number_sends_outlet_and_trims(client):
+    _token()
+    route = respx.get(f"{BASE}/api/v3/Invoice/Detail").mock(
+        return_value=httpx.Response(200, json=_INV))
+    out = await tools.get_invoice_detail(client, number="BC.1", outlet="Main Store")
+    assert dict(route.calls[0].request.url.params) == {"Number": "BC.1", "Outlet": "Main Store"}
+    assert out["Customer"] == {"Code": "C1", "Name": "Rian"}      # no email/phone (PDP)
+    assert out["Variants"] == [{"Code": "SKU1", "Name": "CD A", "Quantity": 1,
+                                "Price": 350000}]
+    assert out["SalesNTax"] == 350000
+
+
+@respx.mock
+async def test_get_invoice_detail_by_id(client):
+    _token()
+    route = respx.get(f"{BASE}/api/v3/Invoice/Detail").mock(
+        return_value=httpx.Response(200, json=_INV))
+    await tools.get_invoice_detail(client, invoice_id="inv-1")
+    assert dict(route.calls[0].request.url.params) == {"ID": "inv-1"}
+
+
+async def test_get_invoice_detail_needs_exactly_one_key(client):
+    with pytest.raises(DealPOSError, match="exactly one"):
+        await tools.get_invoice_detail(client)
+    with pytest.raises(DealPOSError, match="exactly one"):
+        await tools.get_invoice_detail(client, number="BC.1", invoice_id="inv-1")
