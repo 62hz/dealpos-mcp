@@ -13,7 +13,7 @@ credentials. "DealPOS" belongs to its owner.
 
 **Read-only by default.** The 21 read tools work out of the box; 20 are called against live
 DealPOS by `tests/test_contract_live.py` (`get_pricebook` needs a pricebook name, so it is
-the one that is not). The 10 write tools are blocked until you set `DEALPOS_READ_ONLY=false`.
+the one that is not). The 11 write tools are blocked until you set `DEALPOS_READ_ONLY=false`.
 
 ## Quick start (teammates)
 
@@ -73,14 +73,15 @@ config, never in the repo.
 | `get_invoice_detail` | One invoice's line items (variant, qty, price, discount, net sales). By `invoice_id` from `list_invoices`, or `number` plus outlet. Customer is cut to Code and Name |
 | `get_inbound_logistics` | Past PO deliveries (MF has none in DealPOS, so normally empty) |
 
-**Write (10, need `DEALPOS_READ_ONLY=false`)**
+**Write (11, need `DEALPOS_READ_ONLY=false`)**
 
 | Tool | Does |
 |------|------|
 | `create_product`, `update_product` | Add a product, or change product-level fields (`Code`, `ID`, `Variants` are refused) |
-| `update_product_price` | Change one variant's price (`variant_code` required on multi-variant products) |
+| `update_product_price` | Change one variant's price (`variant_code` required on multi-variant products). Read-modify-write on the variant, so weight, description, components and outlet prices survive |
 | `set_variant_weights` | Set shipping weight (grams) on variants |
 | `rename_variant` | Rename one variant (its Model / "Variant" label); everything else on the variant is rewritten as read |
+| `set_variant_discontinued` | Set one variant's Discontinued flag; everything else is rewritten as read |
 | `upsert_pricebook` | Create or update a pricebook by name |
 | `create_composite_variant`, `set_variant_composite` | Bundle variants that draw down component stock |
 | `create_customer` | Add a contact (pass `code`; MF's code generator is off) |

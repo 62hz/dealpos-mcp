@@ -80,6 +80,15 @@ async def rename_variant(code: str, model: str) -> dict:
 
 
 @mcp.tool()
+async def set_variant_discontinued(code: str, discontinued: bool) -> dict:
+    """Set one variant's Discontinued flag (true = discontinued, false = back on sale).
+    code is the VARIANT code (Variants[].Code), not the product code. Everything else on
+    the variant is kept via read-modify-write. Confirm the variant and flag with the user
+    before calling."""
+    return await tools.set_variant_discontinued(_client, code, discontinued)
+
+
+@mcp.tool()
 async def upsert_pricebook(name: str, variants: list[dict], minimum_quantity: int = 0,
                            outlets: list[str] | None = None, start_date: str | None = None,
                            expiration: str | None = None,

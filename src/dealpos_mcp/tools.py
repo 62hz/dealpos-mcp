@@ -376,6 +376,21 @@ async def rename_variant(client: DealPOSClient, code: str, model: str) -> dict:
     return await client.request("PUT", "/api/v3/Variant", json=body)
 
 
+async def set_variant_discontinued(client: DealPOSClient, code: str,
+                                   discontinued: bool) -> dict:
+    """Set one variant's Discontinued flag (True hides it from sale, False restores it).
+    Everything else on the variant is written back as read (read-modify-write, same as
+    rename_variant). ``code`` is the VARIANT code."""
+    if not code or not code.strip():
+        raise DealPOSError("set_variant_discontinued needs the variant code.")
+    if not isinstance(discontinued, bool):
+        raise DealPOSError("discontinued must be true or false.")
+    v = await client.request("GET", "/api/v3/Variant/Detail", params={"Code": code.strip()})
+    body = _variant_body(v)
+    body["Discontinued"] = discontinued
+    return await client.request("PUT", "/api/v3/Variant", json=body)
+
+
 async def _find_pricebook_id(client: DealPOSClient, name: str) -> str | None:
     """Resolve a pricebook name to its ID, or None. The Name query param is a filter, not
     an exact match, so the caller's name is compared exactly against the results — a
@@ -440,8 +455,16 @@ async def get_pricebook(client: DealPOSClient, name: str) -> dict:
 
 async def update_product_price(client: DealPOSClient, code: str, new_price: float,
                                variant_code: str | None = None) -> dict:
-    """Reprice one variant: fetch the product, set that variant's UnitPrice, PUT it back.
-    variant_code may be omitted only when the product has a single variant."""
+    """Reprice one variant. variant_code may be omitted only when the product has a single
+    variant.
+
+    The product is read only to resolve which variant to touch. The write is a
+    read-modify-write PUT /api/v3/Variant (same path as rename_variant), so Weight,
+    Description, Components and OutletPrice survive. The earlier PUT /api/v3/Product
+    rebuilt every variant from get_product's compact rows, which carry none of those, and
+    DealPOS zeroed the weight and replaced the variant description (live 2026-11-17,
+    OLITHEX906-P23: Weight 235 -> 0).
+    """
     variant_code = variant_code or None  # "" means none
     product = await get_product(client, code)
     variants = product.get("Variants") or []
@@ -451,14 +474,16 @@ async def update_product_price(client: DealPOSClient, code: str, new_price: floa
         codes = ", ".join(str(v.get("Code")) for v in variants)
         raise DealPOSError(f"Product {code} has {len(variants)} variants ({codes}); "
                            "pass variant_code so only one is repriced.")
-    changed = False
-    for v in variants:
-        if variant_code is None or v.get("Code") == variant_code:
-            v["UnitPrice"] = new_price
-            changed = True
-    if not changed:
+    if variant_code is None:
+        target = variants[0].get("Code")
+    elif any(v.get("Code") == variant_code for v in variants):
+        target = variant_code
+    else:
         raise DealPOSError(f"Variant {variant_code} not found on product {code}.")
-    return await client.request("PUT", "/api/v3/Product", json=product)
+    v = await client.request("GET", "/api/v3/Variant/Detail", params={"Code": target})
+    body = _variant_body(v)
+    body["UnitPrice"] = new_price
+    return await client.request("PUT", "/api/v3/Variant", json=body)
 
 
 # --- customers write ---

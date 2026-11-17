@@ -134,20 +134,59 @@ async def test_create_product_builds_required_body(client):
 # --- update product price (plan Task 9) ---
 
 @respx.mock
-async def test_update_product_price_sends_full_product_body(client):
+async def test_update_product_price_puts_the_variant_not_the_product(client):
+    """Repricing goes through PUT /Variant (read-modify-write). The old PUT /Product built
+    its Variants[] from get_product's compact rows, which carry no Weight or Description:
+    DealPOS zeroed the weight and replaced the variant description (live 2026-11-17,
+    OLITHEX906-P23: Weight 235 -> 0)."""
     _token()
     respx.get("https://example.dealpos.co.id/api/v3/Product/Code").mock(
         return_value=httpx.Response(200, json={
             "Category": "Music/Vinyl", "Name": "Vinyl A", "Brand": "DD", "Code": "VA",
             "Discontinued": False, "ImageURL": "",
-            "Variants": [{"Model": "Standard", "Code": "VA", "UnitCost": 100000,
+            "Variants": [{"Model": "Standard", "Code": "VA-1", "UnitCost": 100000,
                           "UnitPrice": 300000, "Discontinued": False}]}))
-    route = respx.put("https://example.dealpos.co.id/api/v3/Product").mock(
-        return_value=httpx.Response(200, json={"Code": "VA"}))
-    out = await tools.update_product_price(client, code="VA", new_price=420000)
-    assert out["Code"] == "VA"
-    body = route.calls[0].request.content.decode()
-    assert "420000" in body
+    respx.get(f"{BASE}/api/v3/Variant/Detail").mock(
+        return_value=httpx.Response(200, json=_PRICE_DETAIL))
+    product_put = respx.put(f"{BASE}/api/v3/Product")
+    route = respx.put(f"{BASE}/api/v3/Variant").mock(
+        return_value=httpx.Response(200, json={"Message": "ok"}))
+    await tools.update_product_price(client, code="VA", new_price=420000)
+    assert not product_put.called
+    body = _json.loads(route.calls[0].request.content)
+    assert body["UnitPrice"] == 420000
+
+
+_PRICE_DETAIL = {
+    "Code": "VA-1", "Variant": "10.26/AMI/P23-KLN", "Type": "Standard", "Weight": 235,
+    "UnitCost": 646981, "UnitPrice": 750000, "OrderPrice": 0, "Taxable": True,
+    "LoyaltyPoint": True, "Discontinued": False,
+    "Description": "Variant text\r\nsecond line",
+    "Components": [{"Code": "PART-1", "Name": "Part", "Qty": 2}],
+    "OutletPrice": [{"Outlet": "Main Store", "Price": 750000, "ExtraCost": 0}],
+}
+
+
+@respx.mock
+async def test_update_product_price_keeps_weight_description_components_outlets(client):
+    _token()
+    respx.get(f"{BASE}/api/v3/Product/Code").mock(return_value=httpx.Response(
+        200, json={"Code": "VA", "Variants": [{"Code": "VA-1", "UnitPrice": 750000}]}))
+    detail = respx.get(f"{BASE}/api/v3/Variant/Detail").mock(
+        return_value=httpx.Response(200, json=_PRICE_DETAIL))
+    put = respx.put(f"{BASE}/api/v3/Variant").mock(
+        return_value=httpx.Response(200, json={"Message": "ok"}))
+    await tools.update_product_price(client, code="VA", new_price=929000)
+    assert dict(detail.calls[0].request.url.params) == {"Code": "VA-1"}
+    body = _json.loads(put.calls[0].request.content)
+    expected = tools._variant_body(_PRICE_DETAIL)
+    expected["UnitPrice"] = 929000
+    assert body == expected               # only UnitPrice differs from the read
+    assert body["Weight"] == 235
+    assert body["VariantDescription"] == "Variant text\r\nsecond line"
+    assert body["Model"] == "10.26/AMI/P23-KLN"
+    assert body["Components"] == [{"Code": "PART-1", "Qty": 2}]
+    assert body["OutletPrice"] == [{"Outlet": "Main Store", "Price": 750000, "ExtraCost": 0}]
 
 
 # --- create customer (plan Task 10) ---
@@ -589,7 +628,7 @@ _KM5 = {"Code": "MFKM5CP1", "Name": "KM5 CP1", "Variants": [
 async def test_update_product_price_multi_variant_needs_variant_code(client):
     _token()
     respx.get(f"{BASE}/api/v3/Product/Code").mock(return_value=httpx.Response(200, json=_KM5))
-    put = respx.put(f"{BASE}/api/v3/Product")
+    put = respx.put(f"{BASE}/api/v3/Variant")
     with pytest.raises(DealPOSError, match="MFKM5CP1-BL, MFKM5CP1-NY"):
         await tools.update_product_price(client, code="MFKM5CP1", new_price=1200)
     assert not put.called
@@ -600,11 +639,15 @@ async def test_update_product_price_changes_only_the_named_variant(client):
     _token()
     respx.get(f"{BASE}/api/v3/Product/Code").mock(
         return_value=httpx.Response(200, json=_json.loads(_json.dumps(_KM5))))
-    put = respx.put(f"{BASE}/api/v3/Product").mock(return_value=httpx.Response(200, json={}))
+    detail = respx.get(f"{BASE}/api/v3/Variant/Detail").mock(
+        return_value=httpx.Response(200, json={**_PRICE_DETAIL, "Code": "MFKM5CP1-NY"}))
+    put = respx.put(f"{BASE}/api/v3/Variant").mock(return_value=httpx.Response(200, json={}))
     await tools.update_product_price(client, code="MFKM5CP1", new_price=1200,
                                      variant_code="MFKM5CP1-NY")
-    v = {x["Code"]: x["UnitPrice"] for x in _json.loads(put.calls[0].request.content)["Variants"]}
-    assert v == {"MFKM5CP1-BL": 1000, "MFKM5CP1-NY": 1200}
+    assert [dict(c.request.url.params) for c in detail.calls] == [{"Code": "MFKM5CP1-NY"}]
+    assert len(put.calls) == 1            # the other colour is never written
+    body = _json.loads(put.calls[0].request.content)
+    assert body["Code"] == "MFKM5CP1-NY" and body["UnitPrice"] == 1200
 
 
 # --- update_product protected fields (audit finding 9) ---
@@ -628,9 +671,11 @@ async def test_update_product_price_empty_variant_code_means_none(client):
     _token()
     respx.get(f"{BASE}/api/v3/Product/Code").mock(
         return_value=httpx.Response(200, json=_json.loads(_json.dumps(_ONE))))
-    put = respx.put(f"{BASE}/api/v3/Product").mock(return_value=httpx.Response(200, json={}))
+    respx.get(f"{BASE}/api/v3/Variant/Detail").mock(
+        return_value=httpx.Response(200, json={**_PRICE_DETAIL, "Code": "SOLO-1"}))
+    put = respx.put(f"{BASE}/api/v3/Variant").mock(return_value=httpx.Response(200, json={}))
     await tools.update_product_price(client, code="SOLO", new_price=1500, variant_code="")
-    assert _json.loads(put.calls[0].request.content)["Variants"][0]["UnitPrice"] == 1500
+    assert _json.loads(put.calls[0].request.content)["UnitPrice"] == 1500
 
 
 @respx.mock
@@ -638,7 +683,7 @@ async def test_update_product_price_single_variant_wrong_code_is_not_found(clien
     _token()
     respx.get(f"{BASE}/api/v3/Product/Code").mock(
         return_value=httpx.Response(200, json=_json.loads(_json.dumps(_ONE))))
-    put = respx.put(f"{BASE}/api/v3/Product")
+    put = respx.put(f"{BASE}/api/v3/Variant")
     with pytest.raises(DealPOSError, match="not found"):
         await tools.update_product_price(client, code="SOLO", new_price=1500, variant_code="NOPE")
     assert not put.called
@@ -1516,3 +1561,37 @@ async def test_rename_variant_rejects_empty_name_or_code():
     for code, model in (("A", ""), ("A", "   "), ("", "x")):
         with pytest.raises(DealPOSError):
             await tools.rename_variant(_w_client(), code, model)
+
+
+# --- set_variant_discontinued ---
+
+@respx.mock
+async def test_set_variant_discontinued_changes_only_the_flag():
+    _token()
+    detail = {**_PRICE_DETAIL, "Code": "OLITHEC639-P23", "Discontinued": True}
+    respx.get(f"{BASE}/api/v3/Variant/Detail").mock(
+        return_value=httpx.Response(200, json=detail))
+    put = respx.put(f"{BASE}/api/v3/Variant").mock(
+        return_value=httpx.Response(200, json={"Message": "ok"}))
+    await tools.set_variant_discontinued(_w_client(), "OLITHEC639-P23", False)
+    body = _json.loads(put.calls[0].request.content)
+    expected = tools._variant_body(detail)
+    expected["Discontinued"] = False
+    assert body == expected               # weight, description, components, prices all kept
+    assert body["Weight"] == 235 and body["UnitPrice"] == 750000
+
+
+@respx.mock
+async def test_set_variant_discontinued_can_discontinue():
+    _token()
+    respx.get(f"{BASE}/api/v3/Variant/Detail").mock(
+        return_value=httpx.Response(200, json={**_PRICE_DETAIL, "Discontinued": False}))
+    put = respx.put(f"{BASE}/api/v3/Variant").mock(return_value=httpx.Response(200, json={}))
+    await tools.set_variant_discontinued(_w_client(), "VA-1", True)
+    assert _json.loads(put.calls[0].request.content)["Discontinued"] is True
+
+
+async def test_set_variant_discontinued_rejects_bad_input():
+    for code, flag in (("", True), ("  ", False), ("VA-1", "no"), ("VA-1", None), ("VA-1", 0)):
+        with pytest.raises(DealPOSError):
+            await tools.set_variant_discontinued(_w_client(), code, flag)

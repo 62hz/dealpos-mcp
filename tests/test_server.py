@@ -9,7 +9,8 @@ from dealpos_mcp import server  # noqa: E402
 
 
 WRITE_TOOLS = {"create_product", "update_product", "update_product_price",
-               "set_variant_weights", "rename_variant", "upsert_pricebook", "create_composite_variant",
+               "set_variant_weights", "rename_variant", "set_variant_discontinued",
+               "upsert_pricebook", "create_composite_variant",
                "set_variant_composite", "create_customer", "adjust_stock",
                "reject_adjustment"}
 
