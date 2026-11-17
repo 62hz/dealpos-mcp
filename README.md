@@ -80,6 +80,7 @@ config, never in the repo.
 | `create_product`, `update_product` | Add a product, or change product-level fields (`Code`, `ID`, `Variants` are refused) |
 | `update_product_price` | Change one variant's price (`variant_code` required on multi-variant products) |
 | `set_variant_weights` | Set shipping weight (grams) on variants |
+| `rename_variant` | Rename one variant (its Model / "Variant" label); everything else on the variant is rewritten as read |
 | `upsert_pricebook` | Create or update a pricebook by name |
 | `create_composite_variant`, `set_variant_composite` | Bundle variants that draw down component stock |
 | `create_customer` | Add a contact (pass `code`; MF's code generator is off) |

@@ -326,29 +326,54 @@ async def set_variant_weights(client: DealPOSClient, items: list[dict]) -> list[
 
     results = []
     for i in items:
-        code = i["code"]
-        v = await client.request("GET", "/api/v3/Variant/Detail", params={"Code": code})
-        body = {
-            "Code": v["Code"],
-            "Model": v.get("Variant") or v.get("Model") or "",
-            "Type": v.get("Type") or "Standard",
-            "Weight": int(i["grams"]),
-            "UnitCost": v.get("UnitCost") or 0,
-            "UnitPrice": v.get("UnitPrice") or 0,
-            "OrderPrice": v.get("OrderPrice") or 0,
-            "Taxable": v.get("Taxable", True),
-            "LoyaltyPoint": v.get("LoyaltyPoint", True),
-            "Discontinued": v.get("Discontinued", False),
-            "Components": [{"Code": c["Code"], "Qty": c["Qty"]}
-                           for c in (v.get("Components") or [])],
-            "OutletPrice": [{"Outlet": o["Outlet"], "Price": o["Price"],
-                             "ExtraCost": o.get("ExtraCost", 0)}
-                            for o in (v.get("OutletPrice") or [])],
-        }
-        if v.get("Description"):
-            body["VariantDescription"] = v["Description"]
+        v = await client.request("GET", "/api/v3/Variant/Detail", params={"Code": i["code"]})
+        body = _variant_body(v)
+        body["Weight"] = int(i["grams"])
         results.append(await client.request("PUT", "/api/v3/Variant", json=body))
     return results
+
+
+def _variant_body(v: dict) -> dict:
+    """PUT /api/v3/Variant body that rewrites a variant exactly as GET /Variant/Detail
+    returned it. Callers override the one field they mean to change."""
+    body = {
+        "Code": v["Code"],
+        "Model": v.get("Variant") or v.get("Model") or "",
+        "Type": v.get("Type") or "Standard",
+        "Weight": int(v.get("Weight") or 0),
+        "UnitCost": v.get("UnitCost") or 0,
+        "UnitPrice": v.get("UnitPrice") or 0,
+        "OrderPrice": v.get("OrderPrice") or 0,
+        "Taxable": v.get("Taxable", True),
+        "LoyaltyPoint": v.get("LoyaltyPoint", True),
+        "Discontinued": v.get("Discontinued", False),
+        "Components": [{"Code": c["Code"], "Qty": c["Qty"]}
+                       for c in (v.get("Components") or [])],
+        "OutletPrice": [{"Outlet": o["Outlet"], "Price": o["Price"],
+                         "ExtraCost": o.get("ExtraCost", 0)}
+                        for o in (v.get("OutletPrice") or [])],
+    }
+    if v.get("Description"):
+        body["VariantDescription"] = v["Description"]
+    return body
+
+
+async def rename_variant(client: DealPOSClient, code: str, model: str) -> dict:
+    """Rename one variant: set its Model (the label shown as "Variant" in DealPOS, e.g. a
+    batch tag like '10.26/AMI/P23'). Code, prices, cost, weight, components and description
+    are written back unchanged (read-modify-write, same as set_variant_weights).
+
+    ``code`` is the VARIANT code. Stock, sales history and the product are untouched.
+    """
+    model = (model or "").strip()
+    if not code or not code.strip():
+        raise DealPOSError("rename_variant needs the variant code.")
+    if not model:
+        raise DealPOSError("rename_variant needs a non-empty new name.")
+    v = await client.request("GET", "/api/v3/Variant/Detail", params={"Code": code.strip()})
+    body = _variant_body(v)
+    body["Model"] = model
+    return await client.request("PUT", "/api/v3/Variant", json=body)
 
 
 async def _find_pricebook_id(client: DealPOSClient, name: str) -> str | None:

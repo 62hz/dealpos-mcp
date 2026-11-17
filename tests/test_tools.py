@@ -1491,3 +1491,28 @@ async def test_get_invoice_detail_needs_exactly_one_key(client):
         await tools.get_invoice_detail(client)
     with pytest.raises(DealPOSError, match="exactly one"):
         await tools.get_invoice_detail(client, number="BC.1", invoice_id="inv-1")
+
+
+# --- rename_variant ---
+
+@respx.mock
+async def test_rename_variant_changes_only_model():
+    _token()
+    respx.get(f"{BASE}/api/v3/Variant/Detail").mock(
+        return_value=httpx.Response(200, json={**COMPOSITE_DETAIL, "Weight": 140,
+                                               "Description": "Sealed text"}))
+    put = respx.put(f"{BASE}/api/v3/Variant").mock(
+        return_value=httpx.Response(200, json={"Message": "ok"}))
+    await tools.rename_variant(_w_client(), "PR-CW", "  10.26/AMI/P23-KLN ")
+    body = _json.loads(put.calls[0].request.content)
+    assert body["Model"] == "10.26/AMI/P23-KLN"
+    assert body["Code"] == "PR-CW" and body["Weight"] == 140
+    assert body["UnitPrice"] == 2079000 and body["UnitCost"] == 1307482
+    assert body["Components"] == [{"Code": "SYIN200-CW", "Qty": 2}]
+    assert body["VariantDescription"] == "Sealed text"
+
+
+async def test_rename_variant_rejects_empty_name_or_code():
+    for code, model in (("A", ""), ("A", "   "), ("", "x")):
+        with pytest.raises(DealPOSError):
+            await tools.rename_variant(_w_client(), code, model)

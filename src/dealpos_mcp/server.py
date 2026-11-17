@@ -71,6 +71,15 @@ async def set_variant_weights(items: list[dict]) -> list[dict]:
 
 
 @mcp.tool()
+async def rename_variant(code: str, model: str) -> dict:
+    """Rename one variant: set its Model (the "Variant" label, e.g. a batch tag like
+    '10.26/AMI/P23-KLN'). code is the VARIANT code (Variants[].Code), not the product code.
+    Code, prices, cost, weight, components and description are kept via read-modify-write.
+    Confirm the new name with the user before calling."""
+    return await tools.rename_variant(_client, code, model)
+
+
+@mcp.tool()
 async def upsert_pricebook(name: str, variants: list[dict], minimum_quantity: int = 0,
                            outlets: list[str] | None = None, start_date: str | None = None,
                            expiration: str | None = None,
