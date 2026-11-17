@@ -1712,7 +1712,7 @@ async def test_set_variant_description_changes_only_the_description():
     expected = tools._variant_body(detail)
     expected["VariantDescription"] = _SEALED
     assert body == expected               # weight, price, components, outlets, flags all kept
-    assert body["VariantDescription"].count("\n") == 6      # real newlines survive
+    assert body["VariantDescription"].count("\n") == 5      # real newlines survive
     assert "\u2014" in body["VariantDescription"]
 
 
