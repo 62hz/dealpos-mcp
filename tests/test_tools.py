@@ -1479,6 +1479,9 @@ async def test_update_product_sends_description_and_brand_only(client):
     """mf-dealpos-input sends {"Description", "Brand"}; everything else must go back as read."""
     _token()
     respx.get(f"{BASE}/api/v3/Product/Code").mock(return_value=httpx.Response(200, json=_P02))
+    respx.get(f"{BASE}/api/v3/Variant/Detail").mock(
+        return_value=httpx.Response(200, json={**_PRICE_DETAIL, "Code": "P02-1"}))
+    respx.put(f"{BASE}/api/v3/Variant").mock(return_value=httpx.Response(200, json={}))
     route = respx.put(f"{BASE}/api/v3/Product").mock(
         return_value=httpx.Response(200, json={"Code": "P02"}))
     await tools.update_product(client, "P02", {"Description": "new", "Brand": "Label X"})
@@ -1492,6 +1495,9 @@ async def test_update_product_field_case_lands_on_existing_key(client):
     resolve either way."""
     _token()
     respx.get(f"{BASE}/api/v3/Product/Code").mock(return_value=httpx.Response(200, json=_P02))
+    respx.get(f"{BASE}/api/v3/Variant/Detail").mock(
+        return_value=httpx.Response(200, json={**_PRICE_DETAIL, "Code": "P02-1"}))
+    respx.put(f"{BASE}/api/v3/Variant").mock(return_value=httpx.Response(200, json={}))
     route = respx.put(f"{BASE}/api/v3/Product").mock(
         return_value=httpx.Response(200, json={"Code": "P02"}))
     await tools.update_product(client, "P02", {"description": "new"})
@@ -1595,3 +1601,90 @@ async def test_set_variant_discontinued_rejects_bad_input():
     for code, flag in (("", True), ("  ", False), ("VA-1", "no"), ("VA-1", None), ("VA-1", 0)):
         with pytest.raises(DealPOSError):
             await tools.set_variant_discontinued(_w_client(), code, flag)
+
+
+# --- update_product must not clobber variant fields (live 2026-11-17) ---
+# PUT /Product rebuilds every variant from the compact rows get_product returns, which
+# carry no Weight or Description: DealPOS zeroed weights and replaced variant descriptions
+# (Jungle JUNSUNC593 weight 0, Olivia Dean OLITHEC639-P23 HTML description). The write
+# path therefore snapshots each variant first and restores it through the verified
+# PUT /Variant afterwards.
+
+_P03 = {"Code": "P03", "Name": "CD C", "Category": "Music/CD", "Brand": "", "Description": "old",
+        "Variants": [{"Code": "P03-A", "UnitPrice": 1}, {"Code": "P03-B", "UnitPrice": 2}]}
+
+
+def _p03_details():
+    return {
+        "P03-A": {**_PRICE_DETAIL, "Code": "P03-A", "Weight": 100, "Discontinued": False},
+        "P03-B": {**_PRICE_DETAIL, "Code": "P03-B", "Weight": 235, "Discontinued": True,
+                  "Description": "B text", "Components": [], "OutletPrice": []},
+    }
+
+
+@respx.mock
+async def test_update_product_restores_every_variant_after_the_product_put(client):
+    _token()
+    details = _p03_details()
+    log: list[str] = []
+
+    def detail_reply(request):
+        code = request.url.params["Code"]
+        log.append(f"GET {code}")
+        return httpx.Response(200, json=details[code])
+
+    def product_put(request):
+        log.append("PUT Product")
+        return httpx.Response(200, json={"Code": "P03"})
+
+    def variant_put(request):
+        log.append("PUT " + _json.loads(request.content)["Code"])
+        return httpx.Response(200, json={})
+
+    respx.get(f"{BASE}/api/v3/Product/Code").mock(return_value=httpx.Response(200, json=_P03))
+    respx.get(f"{BASE}/api/v3/Variant/Detail").mock(side_effect=detail_reply)
+    respx.put(f"{BASE}/api/v3/Product").mock(side_effect=product_put)
+    vput = respx.put(f"{BASE}/api/v3/Variant").mock(side_effect=variant_put)
+
+    await tools.update_product(client, "P03", {"Description": "new"})
+
+    # snapshots first, then the product write, then the restores
+    assert log == ["GET P03-A", "GET P03-B", "PUT Product", "PUT P03-A", "PUT P03-B"]
+    restored = {b["Code"]: b for b in (_json.loads(c.request.content) for c in vput.calls)}
+    for code, detail in details.items():
+        assert restored[code] == tools._variant_body(detail)   # byte-identical to the snapshot
+    assert restored["P03-B"]["Weight"] == 235
+    assert restored["P03-B"]["Discontinued"] is True
+    assert restored["P03-B"]["VariantDescription"] == "B text"
+
+
+@respx.mock
+async def test_update_product_snapshot_failure_aborts_before_any_write(client):
+    _token()
+    respx.get(f"{BASE}/api/v3/Product/Code").mock(return_value=httpx.Response(200, json=_P03))
+    respx.get(f"{BASE}/api/v3/Variant/Detail").mock(return_value=httpx.Response(500, json={}))
+    product_put = respx.put(f"{BASE}/api/v3/Product")
+    variant_put = respx.put(f"{BASE}/api/v3/Variant")
+    with pytest.raises(DealPOSError):
+        await tools.update_product(client, "P03", {"Description": "new"})
+    assert not product_put.called and not variant_put.called
+
+
+@respx.mock
+async def test_update_product_names_the_variants_it_could_not_restore(client):
+    """The product PUT already landed; the caller must be told which variants to check."""
+    _token()
+    details = _p03_details()
+    respx.get(f"{BASE}/api/v3/Product/Code").mock(return_value=httpx.Response(200, json=_P03))
+    respx.get(f"{BASE}/api/v3/Variant/Detail").mock(
+        side_effect=lambda r: httpx.Response(200, json=details[r.url.params["Code"]]))
+    respx.put(f"{BASE}/api/v3/Product").mock(return_value=httpx.Response(200, json={"Code": "P03"}))
+    respx.put(f"{BASE}/api/v3/Variant").mock(return_value=httpx.Response(500, json={}))
+    with pytest.raises(DealPOSError, match=r"already updated.*P03-A.*P03-B"):
+        await tools.update_product(client, "P03", {"Description": "new"})
+
+
+async def test_update_product_still_refuses_protected_fields_before_any_request(client):
+    """No respx mock here: any HTTP call at all would fail the test."""
+    with pytest.raises(DealPOSError, match="won't change"):
+        await tools.update_product(client, "P03", {"Variants": []})

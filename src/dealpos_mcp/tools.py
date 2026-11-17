@@ -705,7 +705,17 @@ _PROTECTED_PRODUCT_FIELDS = {"code", "id", "variants"}  # compared case-insensit
 async def update_product(client: DealPOSClient, code: str, fields: dict) -> dict:
     """Patch product-level fields (Name, Brand, Category, Description, ...). Fetches current
     state, merges, PUTs back. Code/ID/Variants are refused: replacing Variants would
-    overwrite every variant's prices, costs and outlet prices."""
+    overwrite every variant's prices, costs and outlet prices.
+
+    PUT /api/v3/Product rebuilds every variant from get_product's compact rows, which carry
+    no Weight or Description, so DealPOS zeroed weights and replaced variant descriptions
+    (live 2026-11-17). To keep variants intact, each one is snapshotted via
+    GET /Variant/Detail first (a failed read aborts before anything is written), the
+    product is PUT, then every variant is written back through PUT /Variant, the
+    read-modify-write path that is known to preserve Weight, Description, Components,
+    OutletPrice, Model and Discontinued. A restore that fails is named in the error: the
+    product write has already landed by then.
+    """
     if not isinstance(fields, dict):
         raise DealPOSError("update_product fields must be an object of field names to values.")
     bad = sorted(k for k in fields if str(k).casefold() in _PROTECTED_PRODUCT_FIELDS)
@@ -716,7 +726,25 @@ async def update_product(client: DealPOSClient, code: str, fields: dict) -> dict
     # 'description' must land on 'Description', not ride along as a second JSON key.
     keys = {k.casefold(): k for k in product}
     product.update({keys.get(str(k).casefold(), k): v for k, v in fields.items()})
-    return await client.request("PUT", "/api/v3/Product", json=product)
+    snapshots = []
+    for row in product.get("Variants") or []:
+        if row.get("Code"):
+            detail = await client.request("GET", "/api/v3/Variant/Detail",
+                                          params={"Code": row["Code"]})
+            snapshots.append(_variant_body(detail))
+    result = await client.request("PUT", "/api/v3/Product", json=product)
+    failed = []
+    for body in snapshots:
+        try:
+            await client.request("PUT", "/api/v3/Variant", json=body)
+        except DealPOSError:
+            failed.append(body["Code"])
+    if failed:
+        raise DealPOSError(
+            f"Product {code} already updated, but these variants could not be restored from "
+            f"their snapshot: {', '.join(failed)}. Check their weight, description, "
+            "components and outlet prices.")
+    return result
 
 
 # --- inventory queries ---

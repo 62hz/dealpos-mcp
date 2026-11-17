@@ -233,8 +233,9 @@ async def get_invoice_detail(invoice_id: str | None = None, number: str | None =
 @mcp.tool()
 async def update_product(code: str, fields: dict) -> dict:
     """Update product-level fields (Name, Brand, Category, Description...). Pass only the
-    fields to change; Code, ID and Variants are refused. Confirm changes with the user
-    before calling."""
+    fields to change; Code, ID and Variants are refused. Every variant is snapshotted
+    first and written back after the product PUT, so weight, description, components and
+    outlet prices survive. Confirm changes with the user before calling."""
     return await tools.update_product(_client, code, fields)
 
 

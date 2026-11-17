@@ -77,7 +77,7 @@ config, never in the repo.
 
 | Tool | Does |
 |------|------|
-| `create_product`, `update_product` | Add a product, or change product-level fields (`Code`, `ID`, `Variants` are refused) |
+| `create_product`, `update_product` | Add a product, or change product-level fields (`Code`, `ID`, `Variants` are refused). `update_product` snapshots each variant first and restores it after the product PUT, so weight, description, components and outlet prices survive |
 | `update_product_price` | Change one variant's price (`variant_code` required on multi-variant products). Read-modify-write on the variant, so weight, description, components and outlet prices survive |
 | `set_variant_weights` | Set shipping weight (grams) on variants |
 | `rename_variant` | Rename one variant (its Model / "Variant" label); everything else on the variant is rewritten as read |
