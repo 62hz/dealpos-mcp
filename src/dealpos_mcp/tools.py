@@ -391,6 +391,21 @@ async def set_variant_discontinued(client: DealPOSClient, code: str,
     return await client.request("PUT", "/api/v3/Variant", json=body)
 
 
+async def set_variant_description(client: DealPOSClient, code: str, description: str) -> dict:
+    """Replace one variant's own description (the per-variant text, not the product-level
+    Description). Everything else is written back as read (read-modify-write, same as
+    rename_variant). ``code`` is the VARIANT code. An empty description is refused: it
+    would be dropped from the PUT body and silently change nothing."""
+    if not code or not code.strip():
+        raise DealPOSError("set_variant_description needs the variant code.")
+    if not isinstance(description, str) or not description.strip():
+        raise DealPOSError("set_variant_description needs a non-empty description string.")
+    v = await client.request("GET", "/api/v3/Variant/Detail", params={"Code": code.strip()})
+    body = _variant_body(v)
+    body["VariantDescription"] = description
+    return await client.request("PUT", "/api/v3/Variant", json=body)
+
+
 async def _find_pricebook_id(client: DealPOSClient, name: str) -> str | None:
     """Resolve a pricebook name to its ID, or None. The Name query param is a filter, not
     an exact match, so the caller's name is compared exactly against the results — a

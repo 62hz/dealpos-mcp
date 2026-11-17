@@ -89,6 +89,15 @@ async def set_variant_discontinued(code: str, discontinued: bool) -> dict:
 
 
 @mcp.tool()
+async def set_variant_description(code: str, description: str) -> dict:
+    """Replace one variant's own description text (not the product-level Description).
+    code is the VARIANT code (Variants[].Code). Keeps newlines and Unicode as given;
+    everything else on the variant is kept via read-modify-write. Confirm the exact text
+    with the user before calling."""
+    return await tools.set_variant_description(_client, code, description)
+
+
+@mcp.tool()
 async def upsert_pricebook(name: str, variants: list[dict], minimum_quantity: int = 0,
                            outlets: list[str] | None = None, start_date: str | None = None,
                            expiration: str | None = None,

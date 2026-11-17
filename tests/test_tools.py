@@ -1688,3 +1688,36 @@ async def test_update_product_still_refuses_protected_fields_before_any_request(
     """No respx mock here: any HTTP call at all would fail the test."""
     with pytest.raises(DealPOSError, match="won't change"):
         await tools.update_product(client, "P03", {"Variants": []})
+
+
+# --- set_variant_description ---
+
+_SEALED = ("Selamat datang di Medium Format!\nCondition:\nSEALED \u2014 100% \u2014 BRAND NEW (IMPORT)\n"
+           "Penting:\nMohon membaca Terms & Conditions yang berlaku di Medium Format.\n"
+           "Membeli berarti menyetujui seluruh ketentuan yang berlaku.")
+
+
+@respx.mock
+async def test_set_variant_description_changes_only_the_description():
+    _token()
+    detail = {**_PRICE_DETAIL, "Code": "OLITHEX906-P23", "Weight": 0,
+              "Description": "<div>damaged &mdash; html</div>"}
+    detail_route = respx.get(f"{BASE}/api/v3/Variant/Detail").mock(
+        return_value=httpx.Response(200, json=detail))
+    put = respx.put(f"{BASE}/api/v3/Variant").mock(
+        return_value=httpx.Response(200, json={"Message": "ok"}))
+    await tools.set_variant_description(_w_client(), " OLITHEX906-P23 ", _SEALED)
+    assert dict(detail_route.calls[0].request.url.params) == {"Code": "OLITHEX906-P23"}
+    body = _json.loads(put.calls[0].request.content)
+    expected = tools._variant_body(detail)
+    expected["VariantDescription"] = _SEALED
+    assert body == expected               # weight, price, components, outlets, flags all kept
+    assert body["VariantDescription"].count("\n") == 6      # real newlines survive
+    assert "\u2014" in body["VariantDescription"]
+
+
+async def test_set_variant_description_rejects_bad_input():
+    for code, text in (("", "x"), ("  ", "x"), ("VA-1", ""), ("VA-1", "   "), ("VA-1", None),
+                       ("VA-1", 5)):
+        with pytest.raises(DealPOSError):
+            await tools.set_variant_description(_w_client(), code, text)
