@@ -13,7 +13,7 @@ credentials. "DealPOS" belongs to its owner.
 
 **Read-only by default.** The 21 read tools work out of the box; 20 are called against live
 DealPOS by `tests/test_contract_live.py` (`get_pricebook` needs a pricebook name, so it is
-the one that is not). The 12 write tools are blocked until you set `DEALPOS_READ_ONLY=false`.
+the one that is not). The 13 write tools are blocked until you set `DEALPOS_READ_ONLY=false`.
 
 ## Quick start (teammates)
 
@@ -73,7 +73,7 @@ config, never in the repo.
 | `get_invoice_detail` | One invoice's line items (variant, qty, price, discount, net sales). By `invoice_id` from `list_invoices`, or `number` plus outlet. Customer is cut to Code and Name |
 | `get_inbound_logistics` | Past PO deliveries (MF has none in DealPOS, so normally empty) |
 
-**Write (12, need `DEALPOS_READ_ONLY=false`)**
+**Write (13, need `DEALPOS_READ_ONLY=false`)**
 
 | Tool | Does |
 |------|------|
